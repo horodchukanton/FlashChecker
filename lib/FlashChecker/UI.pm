@@ -1,0 +1,41 @@
+package FlashChecker::UI;
+use strict;
+use warnings FATAL => 'all';
+
+use Carp;
+
+sub new {
+    my ($class, %params) = @_;
+    my $self = {%params};
+    bless ($self, $class);
+
+    $self->init(%params);
+    $self->start() if !$params{do_not_start};
+
+    return $self;
+}
+
+sub init {
+    my ($self, %params) = @_;
+
+    my $ui_type = $params{ui} || 'Mojo';
+    my $ui_class = "FlashChecker::UI::$ui_type";
+
+    eval {
+        require $ui_class;
+        $self->{ui} = $ui_class->new(%params);
+        1;
+    } or do {
+        confess "Failed to instantiate $ui_class : $@\n";
+    };
+
+    return 1;
+}
+
+sub start {
+    my ($self) = @_;
+
+    return $self->{ui}->start();
+}
+
+1;
