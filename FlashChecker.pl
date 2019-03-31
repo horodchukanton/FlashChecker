@@ -9,10 +9,8 @@ BEGIN {
 }
 
 use FlashChecker;
-use Config::Any;
+use Config::Any::INI;
 
 my $config = Config::Any::INI->load($Bin . '/config.ini');
 
-FlashChecker->start($config);
-
-exit 0;
+FlashChecker->new($config)->start();

@@ -20,9 +20,12 @@ sub init {
 
     my $ui_type = $params{ui} || 'Mojo';
     my $ui_class = "FlashChecker::UI::$ui_type";
+    my $ui_file = "FlashChecker/UI/$ui_type.pm";
 
     eval {
-        require $ui_class;
+        require $ui_file;
+        $ui_class->import();
+
         $self->{ui} = $ui_class->new(%params);
         1;
     } or do {

@@ -1,0 +1,12 @@
+%layout 'default';
+%title 'hi';
+
+<script>
+  var ws = new WebSocket('<%= url_for('echo')->to_abs %>');
+      ws.onmessage = function (event) {
+        document.body.innerHTML += JSON.parse(event.data).msg;
+      };
+      ws.onopen = function (event) {
+        ws.send(JSON.stringify({msg: 'I ♥ Mojolicious!'}));
+      };
+    </script>

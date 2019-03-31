@@ -3,29 +3,31 @@ use strict;
 use warnings FATAL => 'all';
 
 use Mojolicious::Lite;
+use Cwd            qw( abs_path );
+use File::Basename qw( dirname );
 
-get '/' => sub {
-    my $c = shift;
-    $c->render(template => 'index');
-};
+sub import () {
 
-app->start;
+    websocket '/echo' => sub {
+        my $c = shift;
+        $c->on(json => sub {
+            my ($c, $hash) = @_;
+            $hash->{msg} = "echo: $hash->{msg}";
+            $c->send({json => $hash});
+        });
+    };
 
-__DATA__
+    get '/' => sub {
+        my $c = shift;
+        $c->render(template => 'index');
+    };
 
-@@ index.html.ep
-% layout 'default';
-% title 'Welcome';
-<h1>Welcome to the Mojolicious real-time web framework!</h1>
+    push (@{app->renderer->paths}, (dirname(abs_path($0)) . "/templates"));
 
-@@ layouts/default.html.ep
-<!DOCTYPE html>
-<html>
-  <head><title><%= title %></title></head>
-  <body><%= content %></body>
-</html>
-
-
-1;
+    return app->start(
+        'daemon', '-l' => 'http://*:8080',
+        'home'         => dirname(abs_path($0))
+    );
+}
 
 1;

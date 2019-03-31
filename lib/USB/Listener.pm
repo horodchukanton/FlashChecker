@@ -6,6 +6,8 @@ use threads;
 use threads::shared qw/share/;
 use Thread::Queue;
 
+use USB::Device;
+
 use Data::Dumper;
 use Carp;
 
@@ -18,7 +20,7 @@ sub new {
     };
     bless $self, $class;
 
-    $self->{os} = ( $^O =~ 'MSWin32' ) ? 'win' : 'lin';
+    $self->{os} ||= ( $^O =~ 'MSWin32' ) ? 'win' : 'lin';
 
     return $self;
 }
@@ -32,6 +34,7 @@ sub listen {
     $self->{events_queue} = Thread::Queue->new({ type => 'start' });
 
     # Start a thread
+    print "Starting a USB::Listener thread\n" if ($self->{debug});
     $self->{listener} = threads::async sub {listener_thread($self, $period)};
     $self->{listener}->detach();
 
@@ -59,6 +62,11 @@ sub check_for_changed_devices {
     my ( $changed, $created, $removed ) = _compare_lists(\@old_ids, \@new_ids);
 
     if ($changed) {
+        if ($self->{debug}){
+            print "Device connected: $_.  \n"  for @$created;
+            print "Device disconnected: $_.  \n"  for @$removed;
+        }
+
         $queue->enqueue({ type => 'connected', id => $_ }) for @$created;
         $queue->enqueue({ type => 'removed', id => $_ }) for @$removed;
     }
