@@ -4,28 +4,36 @@ use warnings FATAL => 'all';
 
 use Mojo::WebSocket;
 use Mojo::IOLoop;
+use Mojo::Transaction::WebSocket;
+
 use Data::Dumper;
 use Cpanel::JSON::XS qw/encode_json/;
 use Carp;
+
+use Mojo::Log;
+my $log = Mojo::Log->new;
 
 my %delivery_confirm = ();
 my $msg_num = 1;
 
 sub new {
-    my ( $class, %params ) = @_;
+    my ( $class ) = @_;
     my $self = {
-        clients     => [],
-        period      => $params{period} || 3,
-        ping_period => 30,
-        %params
+        clients => {}
     };
     bless $self, $class;
     return $self;
 }
 
 sub start {
-    my ( $self, $queue ) = @_;
-    $self->check_queue($queue);
+    my ( $self, %params ) = @_;
+
+    $self->{period} = $params{Websocket}->{QueuePoll} || 2;
+    $self->{ping_period} = $params{Websocket}->{PingPeriod} || 30;
+
+    $self->{params} = \%params;
+
+    $self->check_queue($params{queue});
     $self->continious_ping();
 }
 
@@ -33,37 +41,30 @@ sub new_client {
     my ( $self, $mojo ) = @_;
 
     my $transaction = $mojo->tx;
-    print "New Client is $transaction \n";;
+    $log->debug("New Client is $transaction");
 
-    push(@{$self->{clients}}, $transaction);
-
-    $mojo->on(json => sub {
-        my ( $mojo_, $hash ) = @_;
-
-        print "INSIDE: $mojo_\n";
-
-        if ($hash->{seq} && $hash->{type} eq 'confirm') {
-            print "Got confirm for $hash->{seq}\n";
-            delete $delivery_confirm{$hash->{seq}};
+    $mojo->on(
+        json   => sub {
+            my ( $mojo_, $hash ) = @_;
+            if ($hash->{seq} && $hash->{type} eq 'confirm') {
+                $log->debug("Got confirm for $hash->{seq}");
+                delete $delivery_confirm{$hash->{seq}};
+            }
+        },
+        finish => sub {
+            $self->client_disconnected($transaction);
         }
-        else {
-            print "Received message: " . Dumper $hash;
-        }
+    );
 
-    });
+    $self->{clients}->{$transaction} = $transaction;
 
-    $mojo->on(finish => sub {
-        $self->client_disconnected($transaction);
-    });
-
-    $self->continious_ping($transaction);
-
-    #
-    # $self->send_message($cl, { type => 'hi there' });
+    return 1;
 }
 
 sub continious_ping {
     my ( $self ) = @_;
+
+    $log->debug("PING: " . scalar(keys %{$self->{clients}}) . "");
 
     $self->{pinger} = Mojo::IOLoop->timer($self->{ping_period} => sub {
         $self->notify_clients({ type => 'ping' });
@@ -73,19 +74,20 @@ sub continious_ping {
 
 sub client_disconnected {
     my ( $self, $cl ) = @_;
+    $log->debug("Client disconnected $cl.");
 
-    print "Client disconected $cl.\n";
-
-    # Find and splice the client that should be disconnected
-    for (my $i = 0; $i < scalar(@{$self->{clients}}); $i ++) {
-        if ($self->{clients}->[$i] eq $cl) {
-            splice(@{$self->{clients}}, $i, 1);
-        }
+    unless (exists $self->{clients}->{$cl}) {
+        $log->debug("Disconnecting a client that was not registered: $cl");
+        return 0;
     }
+
+    delete $self->{clients}->{$cl};
+    return 1;
 }
 
 sub check_queue {
     my ( $self, $queue ) = @_;
+    $log->debug("Checking the queue. ");
 
     $self->{checker} = Mojo::IOLoop->timer($self->{period} => sub {
         eval {
@@ -94,7 +96,7 @@ sub check_queue {
             }
             1;
         } or do {
-            print "Failed to check the queue: $@\n";
+            $log->debug("Failed to check the queue: $@");
         };
 
         # Alwaaays
@@ -104,15 +106,16 @@ sub check_queue {
 
 sub process_events {
     my ( $self, $queue ) = @_;
-    print "Got events\n";
-    print "We have " . ( scalar @{$self->{clients}} ) . " client(s).\n";
+    # $log->debug("Got events");
+    $log->debug("Processing, we have " . ( scalar keys %{$self->{clients}} ) . " client(s).");
 
     # Don't want to miss the events when nobody is connected
-    return 1 unless scalar @{$self->{clients}};
+    return 1 unless scalar keys %{$self->{clients}};
 
-    print "Going to notify\n";
+    # $log->debug("Going to notify");
 
-    while (my $event = $queue->dequeue()) {
+
+    while (my $event = $queue->dequeue_nb()) {
 
         print "EVENT: " . Dumper $event;
 
@@ -135,18 +138,19 @@ sub process_events {
             });
         }
         else {
-            print "Unknown event: " . Dumper($event) . "\n";
+            $log->debug("Unknown event: " . Dumper($event) . "");
         };
     }
-    print "Queue finished.\n";
+    $log->debug("Queue finished.");
     return 1;
 }
 
 sub notify_clients {
     my ( $self, $event ) = @_;
 
-    for (@{$self->{clients}}) {
-        $self->send_message($_, $event);
+    $log->debug("Notify");
+    for (keys %{$self->{clients}}) {
+        $self->send_message($self->{clients}->{$_}, $event);
     }
 
     return 1;
@@ -156,7 +160,6 @@ sub send_message {
     my ( $self, $tx, $msg ) = @_;
 
     $msg->{seq} = $msg_num ++;
-
     $delivery_confirm{$msg->{seq}} = $tx;
 
     my $json;
@@ -170,14 +173,15 @@ sub send_message {
     };
 
     eval {
-        print "Sending message($msg->{seq}) to cl $tx:\n$json\n\n";
+        $log->debug("Sending message($msg->{seq}) to cl $tx:\n$json\n");
         $tx->send($json);
     } or do {
-        print "Failed to send message: $@\n";
+        confess "Failed to send message: $@\n";
         $self->client_disconnected($tx);
         return;
     };
 
+    $log->debug("send message finished");
     return 1;
 }
 

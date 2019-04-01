@@ -36,9 +36,17 @@ sub listen {
     # Start a thread
     print "Starting a USB::Listener thread\n" if ($self->{debug});
     $self->{listener} = threads::async sub {listener_thread($self, $period)};
-    $self->{listener}->detach();
+    # $self->{listener}->detach();
 
     return $self->{events_queue};
+}
+
+sub stop {
+    my ( $self ) = @_;
+    print "Stopping USB::Listener thread\n";
+    $self->{listener}->kill();
+    $self->{listener}->detach();
+
 }
 
 sub listener_thread {
@@ -51,7 +59,7 @@ sub listener_thread {
 }
 
 sub check_for_changed_devices {
-    my ($self) = @_;
+    my ( $self ) = @_;
 
     my $queue = $self->{events_queue};
     my @old_ids = map {$_->identifier()} @{$self->{devices}};
@@ -62,9 +70,9 @@ sub check_for_changed_devices {
     my ( $changed, $created, $removed ) = _compare_lists(\@old_ids, \@new_ids);
 
     if ($changed) {
-        if ($self->{debug}){
-            print "Device connected: $_.  \n"  for @$created;
-            print "Device disconnected: $_.  \n"  for @$removed;
+        if ($self->{debug}) {
+            print "Device connected: $_.  \n" for @$created;
+            print "Device disconnected: $_.  \n" for @$removed;
         }
 
         $queue->enqueue({ type => 'connected', id => $_ }) for @$created;
@@ -82,13 +90,13 @@ sub _compare_lists {
     # Checking old contains all of new
     my @removed = ();
     for my $o (@$old) {
-        push @removed, $o if !grep { $o eq $_} @$new;
+        push @removed, $o if ! grep {$o eq $_} @$new;
     }
 
     # Checking created
     my @created = ();
     for my $n (@$new) {
-        push @created, $n if !grep { $n eq $_} @$old;
+        push @created, $n if ! grep {$n eq $_} @$old;
     }
 
     return 0 if (! @created && ! @removed);
@@ -163,6 +171,11 @@ sub _execute_cmd {
     };
 
     return [ split(/[\r\n]+/, $output) ];
+}
+
+DESTROY{
+    my $self = shift;
+    $self->{listener}->detach();
 }
 
 1;

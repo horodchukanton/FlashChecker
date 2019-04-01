@@ -15,20 +15,35 @@ sub new {
     $self->{listener} = USB::Listener->new(debug => 1);
 
     my $ui_type = $self->{config}->{UI}->{Type};
-    $self->{ui} = FlashChecker::UI->new(ui => $ui_type, do_not_start => 1);
+    $self->{ui} = FlashChecker::UI->new(
+        ui           => $ui_type,
+        do_not_start => 1,
+        UI           => $self->{config}->{UI},
+        Websocket    => $self->{config}->{Websocket}
+    );
 
     return $self;
 }
 
+#@returns USB::Listener
+sub listener {
+    return shift->{listener};
+}
+
+#@returns FlashChecker::UI
 sub start {
     my ( $self ) = @_;
 
-    my $events_queue = $self->{listener}->listen();
+    my $events_queue = $self->{listener}->listen(
+        period => $self->{config}->{USB}->{Poll} || 5
+    );
 
-    return $self->{ui}->start(
+    my $ui = $self->{ui}->start(
         config => $self->{config},
         queue  => $events_queue
     );
+
+    return $ui;
 }
 
 
