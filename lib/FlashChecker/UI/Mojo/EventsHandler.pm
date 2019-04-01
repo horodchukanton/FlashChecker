@@ -28,8 +28,10 @@ sub new {
 sub start {
     my ( $self, %params ) = @_;
 
-    $self->{period} = $params{Websocket}->{QueuePoll} || 2;
-    $self->{ping_period} = $params{Websocket}->{PingPeriod} || 30;
+    my $config = $params{config};
+
+    $self->{period} = $config->{USB}->{Poll} || 3;
+    $self->{ping_period} = $config->{Websocket}->{PingPeriod} || 30;
 
     $self->{params} = \%params;
 
@@ -47,7 +49,13 @@ sub new_client {
         json   => sub {
             my ( $mojo_, $hash ) = @_;
             if ($hash->{seq} && $hash->{type} eq 'confirm') {
-                $log->debug("Got confirm for $hash->{seq}");
+                my $confirm_action = $delivery_confirm{$hash->{seq}}->{confirm_sub};
+                return unless $confirm_action;
+
+                if (ref $confirm_action eq 'CODE') {
+                    $confirm_action->($hash);
+                }
+
                 delete $delivery_confirm{$hash->{seq}};
             }
         },
@@ -64,10 +72,12 @@ sub new_client {
 sub continious_ping {
     my ( $self ) = @_;
 
-    $log->debug("PING: " . scalar(keys %{$self->{clients}}) . "");
+    $log->debug("every $self->{ping_period}. PING: " . scalar(keys %{$self->{clients}}) . "");
 
     $self->{pinger} = Mojo::IOLoop->timer($self->{ping_period} => sub {
-        $self->notify_clients({ type => 'ping' });
+        $self->notify_clients({ type => 'ping' }, sub {
+            $log->debug("Ping was confirmed");
+        });
         $self->continious_ping();
     });
 }
@@ -106,19 +116,9 @@ sub check_queue {
 
 sub process_events {
     my ( $self, $queue ) = @_;
-    # $log->debug("Got events");
     $log->debug("Processing, we have " . ( scalar keys %{$self->{clients}} ) . " client(s).");
 
-    # Don't want to miss the events when nobody is connected
-    return 1 unless scalar keys %{$self->{clients}};
-
-    # $log->debug("Going to notify");
-
-
     while (my $event = $queue->dequeue_nb()) {
-
-        print "EVENT: " . Dumper $event;
-
         if ($event->{type} eq 'start') {
             $self->notify_clients({
                 type => 'restarted'
@@ -131,7 +131,7 @@ sub process_events {
             });
         }
         elsif ($event->{type} eq 'connected') {
-            # Need to gather info about the device,
+            # TODO: Need to gather info about the device,
             $self->notify_clients({
                 type => 'connected',
                 id   => $event->{id}
@@ -141,33 +141,36 @@ sub process_events {
             $log->debug("Unknown event: " . Dumper($event) . "");
         };
     }
-    $log->debug("Queue finished.");
+
     return 1;
 }
 
 sub notify_clients {
-    my ( $self, $event ) = @_;
+    my ( $self, $event, $cb ) = @_;
 
     $log->debug("Notify");
     for (keys %{$self->{clients}}) {
-        $self->send_message($self->{clients}->{$_}, $event);
+        $self->send_message($self->{clients}->{$_}, $event, $cb);
     }
 
     return 1;
 }
 
 sub send_message {
-    my ( $self, $tx, $msg ) = @_;
+    my ( $self, $tx, $msg, $confirm_sub ) = @_;
 
     $msg->{seq} = $msg_num ++;
-    $delivery_confirm{$msg->{seq}} = $tx;
+    $delivery_confirm{$msg->{seq}} = {
+        client      => $tx,
+        confirm_sub => $confirm_sub
+    };
 
     my $json;
     eval {
         $json = Cpanel::JSON::XS::encode_json($msg);
         1;
     } or do {
-        print Dumper $msg;
+        print "to JSON:" . Dumper $msg;
         confess "Failed to encode json : $@";
         return;
     };
@@ -180,8 +183,6 @@ sub send_message {
         $self->client_disconnected($tx);
         return;
     };
-
-    $log->debug("send message finished");
     return 1;
 }
 

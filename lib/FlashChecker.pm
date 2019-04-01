@@ -8,7 +8,7 @@ use USB::Listener;
 use FlashChecker::UI;
 
 sub new {
-    my ( $class, $config ) = shift;
+    my ( $class, $config ) = @_;
     my $self = { config => $config };
     bless $self, $class;
 
@@ -18,8 +18,8 @@ sub new {
     $self->{ui} = FlashChecker::UI->new(
         ui           => $ui_type,
         do_not_start => 1,
-        UI           => $self->{config}->{UI},
-        Websocket    => $self->{config}->{Websocket}
+        UI           => ${config}->{UI},
+        Websocket    => ${config}->{Websocket}
     );
 
     return $self;

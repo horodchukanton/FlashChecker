@@ -11,9 +11,6 @@ sub new {
 
     $self->init(%params);
 
-    $self->start($params{events_queue})
-        if ($params{events_queue});
-
     return $self;
 }
 
@@ -43,7 +40,8 @@ sub start {
     $self->{config} = $params{config};
 
     return $self->{ui}->run({
-        queue => $params{queue}
+        queue => $params{queue},
+        %params
     });
 
 }

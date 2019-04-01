@@ -23,7 +23,7 @@
         }));
     }
 
-    document.body.innerHTML += JSON.parse(event.data) + '<br/>';
+    document.body.innerHTML += JSON.stringify(event.data) + '<br/>';
   };
 
   ws.onopen = function (event) {
