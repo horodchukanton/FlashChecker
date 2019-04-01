@@ -2,32 +2,20 @@ package FlashChecker::UI::Mojo;
 use strict;
 use warnings FATAL => 'all';
 
-use Mojolicious::Lite;
-use Cwd            qw( abs_path );
-use File::Basename qw( dirname );
+use FlashChecker::UI::Mojo::App;
 
-sub import () {
+sub new {
+    my ($class, %params) = @_;
+    my $self = { %params };
+    bless $self, $class;
+    return $self;
+}
 
-    websocket '/echo' => sub {
-        my $c = shift;
-        $c->on(json => sub {
-            my ($c, $hash) = @_;
-            $hash->{msg} = "echo: $hash->{msg}";
-            $c->send({json => $hash});
-        });
-    };
+sub run {
+    my ($self, $params) = @_;
+    my $queue = $params->{queue};
 
-    get '/' => sub {
-        my $c = shift;
-        $c->render(template => 'index');
-    };
-
-    push (@{app->renderer->paths}, (dirname(abs_path($0)) . "/templates"));
-
-    return app->start(
-        'daemon', '-l' => 'http://*:8080',
-        'home'         => dirname(abs_path($0))
-    );
+    FlashChecker::UI::Mojo::App::run($queue);
 }
 
 1;

@@ -38,7 +38,7 @@ sub listen {
     $self->{listener} = threads::async sub {listener_thread($self, $period)};
     $self->{listener}->detach();
 
-    return 1;
+    return $self->{events_queue};
 }
 
 sub listener_thread {

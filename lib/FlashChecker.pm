@@ -13,9 +13,8 @@ sub new {
     bless $self, $class;
 
     $self->{listener} = USB::Listener->new(debug => 1);
-    $self->{listener}->listen();
 
-    my $ui_type = $self->{config}->{UI}{Type};
+    my $ui_type = $self->{config}->{UI}->{Type};
     $self->{ui} = FlashChecker::UI->new(ui => $ui_type, do_not_start => 1);
 
     return $self;
@@ -23,7 +22,13 @@ sub new {
 
 sub start {
     my ( $self ) = @_;
-    return $self->{ui}->start();
+
+    my $events_queue = $self->{listener}->listen();
+
+    return $self->{ui}->start(
+        config => $self->{config},
+        queue  => $events_queue
+    );
 }
 
 

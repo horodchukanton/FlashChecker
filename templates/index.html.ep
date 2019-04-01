@@ -1,12 +1,33 @@
 %layout 'default';
-%title 'hi';
+%title 'Websocket Test';
 
 <script>
-  var ws = new WebSocket('<%= url_for('echo')->to_abs %>');
-      ws.onmessage = function (event) {
-        document.body.innerHTML += JSON.parse(event.data).msg;
-      };
-      ws.onopen = function (event) {
-        ws.send(JSON.stringify({msg: 'I ♥ Mojolicious!'}));
-      };
-    </script>
+  var ws = new WebSocket('<%= url_for('ws')->to_abs %>');
+
+  ws.onmessage = function (event) {
+
+    var message = JSON.parse(event.data);
+    console.log(message);
+
+    var type = message['type'];
+
+    if (type){
+      var messageNum = message['seq'];
+      if (!messageNum){
+          messageNum = 0
+      }
+
+      ws.send(JSON.stringify({
+          seq  : messageNum,
+          type : 'confirm'
+        }));
+    }
+
+    document.body.innerHTML += JSON.parse(event.data) + '<br/>';
+  };
+
+  ws.onopen = function (event) {
+    ws.send(JSON.stringify({msg: 'I ♥ Mojolicious!'}));
+  };
+
+</script>

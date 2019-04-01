@@ -5,18 +5,20 @@ use warnings FATAL => 'all';
 use Carp;
 
 sub new {
-    my ($class, %params) = @_;
-    my $self = {%params};
-    bless ($self, $class);
+    my ( $class, %params ) = @_;
+    my $self = { %params };
+    bless($self, $class);
 
     $self->init(%params);
-    $self->start() if !$params{do_not_start};
+
+    $self->start($params{events_queue})
+        if ($params{events_queue});
 
     return $self;
 }
 
 sub init {
-    my ($self, %params) = @_;
+    my ( $self, %params ) = @_;
 
     my $ui_type = $params{ui} || 'Mojo';
     my $ui_class = "FlashChecker::UI::$ui_type";
@@ -36,9 +38,14 @@ sub init {
 }
 
 sub start {
-    my ($self) = @_;
+    my ( $self, %params ) = @_;
 
-    return $self->{ui}->start();
+    $self->{config} = $params{config};
+
+    return $self->{ui}->run({
+        queue => $params{queue}
+    });
+
 }
 
 1;
