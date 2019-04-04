@@ -11,7 +11,6 @@ BEGIN {
 }
 
 use_ok('USB::Listener');
-use_ok('USB::Device');
 
 my $listener = USB::Listener->new();
 my $devices = $listener->get_list_of_devices();

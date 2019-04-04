@@ -6,7 +6,7 @@ use threads;
 use threads::shared qw/share/;
 use Thread::Queue;
 
-use USB::Device;
+use USB::_Execute qw/execute/;
 
 use Data::Dumper;
 use Carp;
@@ -62,10 +62,10 @@ sub check_for_changed_devices {
     my ( $self ) = @_;
 
     my $queue = $self->{events_queue};
-    my @old_ids = map {$_->identifier()} @{$self->{devices}};
+    my @old_ids = map {$_->{id}} @{$self->{devices}};
 
     my $new_list = $self->get_list_of_devices();
-    my @new_ids = map {$_->identifier()} @{$new_list};
+    my @new_ids = map {$_->{id}} @{$new_list};
 
     my ( $changed, $created, $removed ) = _compare_lists(\@old_ids, \@new_ids);
 
@@ -81,8 +81,6 @@ sub check_for_changed_devices {
 
     $self->{devices} = $new_list;
 }
-
-
 
 sub _compare_lists {
     my ( $old, $new ) = @_;
@@ -107,22 +105,60 @@ sub get_list_of_devices {
     my ( $self ) = @_;
 
     my $list = ( $self->{os} eq 'win' )
-        ? $self->get_devices_win()
-        : $self->get_devices_lin();
+        ? get_devices_win()
+        : get_devices_lin();
 
     return $list;
 }
 
-sub get_devices_win {
-    my $self = shift;
-    my $cmd = 'wmic logicaldisk where drivetype=2 get deviceid,volumeserialnumber /FORMAT:list';
-    my $list = $self->_execute_cmd($cmd, "List of the devices");
+sub get_device_info {
+    my ( $self ) = @_;
 
-    # Windows returns the list starting with 'DeviceID=G:'
+    my $info = ( $self->{os} eq 'win' )
+        ? get_info_win()
+        : get_info_lin();
+
+    return $info;
+}
+
+sub get_devices_win {
+    my $cmd = 'wmic logicaldisk where drivetype=2 get deviceid,volumeserialnumber /FORMAT:list';
+    my $cmd_result = execute($cmd, "List of the devices");
+
+    my $list = _parse_win_keypairs($cmd_result);
+    return [ map {$_->{id} = $_->{VolumeSerialNumber}; $_} @$list ]
+}
+
+sub get_info_win {
+    my ( $device_id ) = @_;
+
+    my $cmd = qq{wmic logicaldisk where "drivetype=2 and volumeserialnumber=\"$device_id\""}
+     . q{get filesystem,size,volumeserialnumber,deviceid,filesystem,description /FORMAT:list};
+
+    my $list = execute($cmd, "Device info");
+
+    return _parse_win_keypairs($list);
+}
+
+
+sub get_devices_lin {
+    my $cmd = q{ls -1 /dev/disk/by-id/ | grep -v -E '\-part[0-9]+$' | grep '^usb'};
+    return execute($cmd, "List of the devices");
+
+}
+
+sub get_info_lin {
+  die "get_info_lin Unimplemented";
+}
+
+sub _parse_win_keypairs {
+    my ( $cmd_output ) = @_;
+
     my @result = ();
+    # Windows returns the list starting with 'DeviceID=G:'
 
     my %current_device_opts = ();
-    for (@$list) {
+    for (@$cmd_output) {
         next unless $_;
 
         my ( $name, $value ) = split('=', $_, 2);
@@ -130,7 +166,7 @@ sub get_devices_win {
         # Next device started
         if (%current_device_opts && $name eq 'DeviceID') {
             $current_device_opts{DeviceID} = $value;
-            push @result, USB::Device->new(%current_device_opts) if ($current_device_opts{VolumeSerialNumber});
+            push @result, \%current_device_opts;
             %current_device_opts = ();
             next;
         }
@@ -140,37 +176,10 @@ sub get_devices_win {
 
     # Saving last one (if any keys are present)
     if (%current_device_opts) {
-        push @result, USB::Device->new(%current_device_opts) if ($current_device_opts{VolumeSerialNumber});
+        push @result, \%current_device_opts;
     }
 
     return \@result;
-}
-
-sub get_info_win {
-
-}
-
-sub get_devices_lin {
-    my $self = shift;
-    my $cmd = q{ls -1 /dev/disk/by-id/ | grep -v -E '\-part[0-9]+$' | grep '^usb'};
-    return $self->_execute_cmd($cmd, "List of the devices");
-
-}
-
-sub get_info_lin {
-
-}
-
-sub _execute_cmd {
-    my ( $self, $cmd, $description ) = @_;
-    my $output;
-    eval {
-        $output = `$cmd`;
-    } or do {
-        confess "Failed to execute '$description' command.\nOS:'$self->{os}'\nCMD: '$cmd'\n";
-    };
-
-    return [ split(/[\r\n]+/, $output) ];
 }
 
 DESTROY{
