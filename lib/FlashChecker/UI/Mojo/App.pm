@@ -3,6 +3,8 @@ use strict;
 use warnings FATAL => 'all';
 
 use Mojolicious::Lite;
+# plugin AutoReload => {};
+
 use Cwd qw(abs_path);
 use File::Basename qw(dirname);
 
@@ -12,6 +14,7 @@ use Data::Dumper;
 use FlashChecker::UI::Mojo::EventsHandler;
 
 my $handler = FlashChecker::UI::Mojo::EventsHandler->new();
+my $cwd = dirname(abs_path($0));
 
 sub run {
     my ( %params ) = @_;
@@ -22,13 +25,14 @@ sub run {
 
     return app->start(
         'daemon', 'morbo', '-l' => 'http://*:8080',
-        'home'                  => dirname(abs_path($0)),
+        'home'                  => $cwd,
         %{$params{UI}->{Mojo} ? $params{UI}->{Mojo} : {}}
     );
 }
 
 sub init {
     push(@{app->renderer->paths}, ( dirname(abs_path($0)) . "/templates" ));
+    push(@{app->static->paths}, ( dirname(abs_path($0)) . "/static" ));
     define_routes();
 
     return 1;
@@ -38,8 +42,7 @@ sub init {
 
 sub define_routes {
     websocket '/ws' => sub {
-        my $self = shift;
-        $handler->new_client($self)
+        $handler->websocket_message(shift)
     };
 
     get '/' => sub {

@@ -1,3 +1,7 @@
+'use strict';
+var ws = null;
+var devicesList = null;
+
 function processMessage(message) {
     var debugStr = $('<p>').text(JSON.stringify(message));
     $('div#debug').append(debugStr);
@@ -11,23 +15,30 @@ function processMessage(message) {
             devicesList.remove(message['id']);
             break;
         case 'restarted':
-            ws.send(JSON.stringify({ type: 'request_list' }));
+            ws.send({type: 'request_list'});
+            break;
+        case 'list':
+            devicesList.renew(message['devices']);
             break;
         default:
             console.log("I'm not very smart indeed :)" + JSON.stringify(message))
     }
-
-
 }
 
 function DevicesList() {
-  this.devices = {};
+    this.devices = {};
 }
 
 DevicesList.prototype = {
-    add: function(usbDevice){},
+    add: function (usbDevice) {
+        console.log('add ', usbDevice)
+    },
     remove: function (deviceId) {
+        console.log('remove ', deviceId);
 
+    },
+    renew: function (deviceInfoList) {
+        console.log('renew ', deviceInfoList);
     }
 };
 
@@ -37,15 +48,23 @@ function USBDevice(attributes) {
 }
 
 USBDevice.prototype = {
-    getInfo : function (){
+    getInfo: function () {
         return this.info;
     }
 };
 
-
-var ws = null;
 $(function () {
-    console.log('ready');
+
+    Events.on('WebSocket.connected', function () {
+        devicesList = new DevicesList();
+        Events.on('message', processMessage);
+        ws.send({type: 'request_list'});
+    });
+
     ws = new WSClient(OPTIONS['websocket_url']);
 });
-Events.on('message', processMessage);
+
+document.onunload = function () {
+    ws.request_close_socket()
+};
+

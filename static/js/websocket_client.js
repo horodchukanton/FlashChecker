@@ -14,6 +14,9 @@ var WSClient = function (socket_link) {
     }
 };
 WSClient.prototype = {
+    send: function (message) {
+        this.ws.send(JSON.stringify(message))
+    },
     on_message: function (event) {
         var message = null;
         try {
@@ -51,10 +54,10 @@ WSClient.prototype = {
         Events.emit('WebSocket.connected');
     },
     ping: function () {
-        this.ws.send(JSON.stringify({type : 'ping'}));
+        this.ws.send(JSON.stringify({type: 'ping'}));
     },
     request_close_socket: function () {
-        this.ws.send(JSON.stringify({type : 'closing'}));
+        this.ws.send(JSON.stringify({type: 'closing'}));
         this.try_to_connect_again = false;
     },
     try_to_connect_again_in_: function (seconds) {
