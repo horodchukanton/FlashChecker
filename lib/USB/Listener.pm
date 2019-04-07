@@ -112,13 +112,13 @@ sub get_list_of_devices {
 }
 
 sub get_device_info {
-    my ( $self ) = @_;
+    my ( $self, $device_id ) = @_;
 
     my $info = ( $self->{os} eq 'win' )
-        ? get_info_win()
-        : get_info_lin();
+        ? get_info_win($device_id)
+        : get_info_lin($device_id);
 
-    return $info;
+    return $info->[0];
 }
 
 sub get_devices_win {
@@ -126,14 +126,15 @@ sub get_devices_win {
     my $cmd_result = execute($cmd, "List of the devices");
 
     my $list = _parse_win_keypairs($cmd_result);
-    return [ map {$_->{id} = $_->{VolumeSerialNumber}; $_} @$list ]
+    return [ map {$_->{id} = $_->{VolumeSerialNumber};
+        $_} @$list ]
 }
 
 sub get_info_win {
     my ( $device_id ) = @_;
 
-    my $cmd = qq{wmic logicaldisk where "drivetype=2 and volumeserialnumber=\"$device_id\""}
-     . q{get filesystem,size,volumeserialnumber,deviceid,filesystem,description /FORMAT:list};
+    my $cmd = qq{wmic logicaldisk where "drivetype=2 and volumeserialnumber=\"$device_id\"" }
+        . q{get filesystem,size,volumeserialnumber,deviceid,filesystem,description /FORMAT:list};
 
     my $list = execute($cmd, "Device info");
 
@@ -148,7 +149,7 @@ sub get_devices_lin {
 }
 
 sub get_info_lin {
-  die "get_info_lin Unimplemented";
+    die "get_info_lin Unimplemented";
 }
 
 sub _parse_win_keypairs {
@@ -175,7 +176,7 @@ sub _parse_win_keypairs {
     }
 
     # Saving last one (if any keys are present)
-    if (%current_device_opts) {
+    if ($current_device_opts{DeviceID}) {
         push @result, \%current_device_opts;
     }
 
