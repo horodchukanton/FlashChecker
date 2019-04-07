@@ -2,24 +2,22 @@ package FlashChecker::UI::Mojo::EventsHandler;
 use strict;
 use warnings FATAL => 'all';
 
-use Mojo::WebSocket;
-use Mojo::IOLoop;
-use Mojo::Transaction::WebSocket;
-
 use Data::Dumper;
-use Cpanel::JSON::XS qw/encode_json/;
 use Carp;
 
+use Mojo::IOLoop;
 use Mojo::Log;
-my $log = Mojo::Log->new;
 
-my %delivery_confirm = ();
-my $msg_num = 1;
+use USB::Listener;
+use FlashChecker::UI::Mojo::Clients;
+
+my $log = Mojo::Log->new;
 
 sub new {
     my ( $class ) = @_;
     my $self = {
-        clients => {}
+        clients  => FlashChecker::UI::Mojo::Clients->new(),
+        listener => USB::Listener->new()
     };
     bless $self, $class;
     return $self;
@@ -31,73 +29,67 @@ sub start {
     my $config = $params{config};
 
     $self->{period} = $config->{USB}->{Poll} || 3;
-    $self->{ping_period} = $config->{Websocket}->{PingPeriod} || 30;
-
     $self->{params} = \%params;
 
     $self->check_queue($params{queue});
-    $self->continious_ping();
+
+    $self->clients->config($config);
+    $self->clients->_continious_ping();
 }
 
-sub new_client {
+#@returns FlashChecker::UI::Mojo::Clients
+sub clients {
+    my ( $self ) = @_;
+    return $self->{clients};
+}
+
+#@returns USB::Listener
+sub listener {
+    my ( $self ) = @_;
+    return $self->{listener};
+}
+
+sub websocket_message {
     my ( $self, $mojo ) = @_;
 
-    my $transaction = $mojo->tx;
-    $log->debug("New Client is $transaction");
+    my $cl_id = $self->clients->add($mojo->tx);
 
     $mojo->on(
         json   => sub {
-            my ( $mojo_, $hash ) = @_;
-            if ($hash->{seq} && $hash->{type} eq 'confirm') {
-                my $confirm_action = $delivery_confirm{$hash->{seq}}->{confirm_sub};
-                return unless $confirm_action;
+            my $clients = $self->clients;
 
-                if (ref $confirm_action eq 'CODE') {
-                    $confirm_action->($hash);
+            # Passing technical messages
+            my $operation_message = $clients->on_message($cl_id, @_);
+            return if (! $operation_message);
+
+            my ( undef, $hash ) = @_;
+
+            if ('request_list' eq $hash->{type}) {
+                $clients->send_message($cl_id, {
+                    type    => 'list',
+                    devices => $self->listener->get_list_of_devices()
+                });
+            }
+            elsif ('request_info' eq $hash->{type}) {
+                unless ($hash->{device_id}) {
+                    $log->warn("No device id to return info");
+                    return;
                 }
-
-                delete $delivery_confirm{$hash->{seq}};
+                $clients->send_message($cl_id, {
+                    type    => 'device',
+                    devices => $self->listener->get_device_info($hash->{device_id})
+                });
             }
         },
-        finish => sub {
-            $self->client_disconnected($transaction);
-        }
+        finish => sub {$self->clients->disconnected($cl_id)}
     );
 
-    $self->{clients}->{$transaction} = $transaction;
-
-    return 1;
-}
-
-sub continious_ping {
-    my ( $self ) = @_;
-
-    $log->debug("every $self->{ping_period}. PING: " . scalar(keys %{$self->{clients}}) . "");
-
-    $self->{pinger} = Mojo::IOLoop->timer($self->{ping_period} => sub {
-        $self->notify_clients({ type => 'ping' }, sub {
-            $log->debug("Ping was confirmed");
-        });
-        $self->continious_ping();
-    });
-}
-
-sub client_disconnected {
-    my ( $self, $cl ) = @_;
-    $log->debug("Client disconnected $cl.");
-
-    unless (exists $self->{clients}->{$cl}) {
-        $log->debug("Disconnecting a client that was not registered: $cl");
-        return 0;
-    }
-
-    delete $self->{clients}->{$cl};
     return 1;
 }
 
 sub check_queue {
     my ( $self, $queue ) = @_;
-    $log->debug("Checking the queue. ");
+    # $log->debug("Checking the queue. ");
 
     $self->{checker} = Mojo::IOLoop->timer($self->{period} => sub {
         eval {
@@ -116,26 +108,24 @@ sub check_queue {
 
 sub process_events {
     my ( $self, $queue ) = @_;
-    $log->debug("Processing, we have " . ( scalar keys %{$self->{clients}} ) . " client(s).");
+    $log->debug("Processing, we have " . $self->clients->count . " client(s).");
 
     while (my $event = $queue->dequeue_nb()) {
         if ($event->{type} eq 'start') {
-            $self->notify_clients({
+            $self->clients->notify_all({
                 type => 'restarted'
             });
         }
         elsif ($event->{type} eq 'removed') {
-            $self->notify_clients({
+            return unless $event->{id};
+            $self->clients->notify_all({
                 type => 'removed',
                 id   => $event->{id}
             });
         }
         elsif ($event->{type} eq 'connected') {
-            # TODO: Need to gather info about the device,
-            $self->notify_clients({
-                type => 'connected',
-                id   => $event->{id}
-            });
+            return unless $event->{id};
+            $self->new_device_connected($event->{id});
         }
         else {
             $log->debug("Unknown event: " . Dumper($event) . "");
@@ -145,50 +135,19 @@ sub process_events {
     return 1;
 }
 
-sub notify_clients {
-    my ( $self, $event, $cb ) = @_;
+sub new_device_connected {
+    my ( $self, $device_id ) = @_;
 
-    $log->debug("Notify");
-    for (keys %{$self->{clients}}) {
-        $self->send_message($self->{clients}->{$_}, $event, $cb);
-    }
+    my $info = $self->listener->get_device_info($device_id);
+    $log->debug("Failed to get info for: ", $info);
+
+    $self->clients->notify_all({
+        type   => 'connected',
+        id     => $device_id,
+        device => $info
+    });
 
     return 1;
 }
-
-sub send_message {
-    my ( $self, $tx, $msg, $confirm_sub ) = @_;
-
-    $msg->{seq} = $msg_num ++;
-    $delivery_confirm{$msg->{seq}} = {
-        client      => $tx,
-        confirm_sub => $confirm_sub
-    };
-
-    my $json;
-    eval {
-        $json = Cpanel::JSON::XS::encode_json($msg);
-        1;
-    } or do {
-        print "to JSON:" . Dumper $msg;
-        confess "Failed to encode json : $@";
-        return;
-    };
-
-    eval {
-        $log->debug("Sending message($msg->{seq}) to cl $tx:\n$json\n");
-        $tx->send($json);
-    } or do {
-        confess "Failed to send message: $@\n";
-        $self->client_disconnected($tx);
-        return;
-    };
-    return 1;
-}
-
-END {
-    print "UNDELIVERED: " . Dumper \%delivery_confirm;
-}
-
 
 1;
