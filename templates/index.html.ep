@@ -2,32 +2,11 @@
 %title 'Websocket Test';
 
 <script>
-  var ws = new WebSocket('<%= url_for('ws')->to_abs %>');
-
-  ws.onmessage = function (event) {
-
-    var message = JSON.parse(event.data);
-    console.log(message);
-
-    var type = message['type'];
-
-    if (type){
-      var messageNum = message['seq'];
-      if (!messageNum){
-          messageNum = 0
-      }
-
-      ws.send(JSON.stringify({
-          seq  : messageNum,
-          type : 'confirm'
-        }));
-    }
-
-    document.body.innerHTML += JSON.stringify(event.data) + '<br/>';
-  };
-
-  ws.onopen = function (event) {
-    ws.send(JSON.stringify({msg: 'I ♥ Mojolicious!'}));
-  };
-
+var OPTIONS = {
+    websocket_url : '<%= url_for('ws')->to_abs() =%>',
+}
 </script>
+
+<div id="debug"></div>
+<script src="/js/flash_checker.js"></script>
+
