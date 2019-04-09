@@ -8,7 +8,8 @@ function processMessage(message) {
 
     switch (message['type']) {
         case 'connected':
-            var device = new USBDevice(message['device']);
+            var device = new USBDevice(message['id'], message['device']);
+            console.log(device);
             devicesList.add(device);
             break;
         case 'removed':
@@ -23,6 +24,9 @@ function processMessage(message) {
         default:
             console.log("I'm not very smart indeed :)" + JSON.stringify(message))
     }
+
+    $('div#flash-container').html(devicesList.toHtml());
+
 }
 
 function DevicesList() {
@@ -31,30 +35,57 @@ function DevicesList() {
 
 DevicesList.prototype = {
     add: function (usbDevice) {
-        console.log('add ', usbDevice)
+        this.devices[usbDevice.getId()] = usbDevice;
     },
     remove: function (deviceId) {
-        console.log('remove ', deviceId);
-
+        delete this.devices[deviceId];
     },
     renew: function (deviceInfoList) {
-        console.log('renew ', deviceInfoList);
+        var self = this;
+        deviceInfoList.forEach(function (devInfo) {
+            var id = devInfo['VolumeSerialNumber'];
+            self.add(new USBDevice(id, devInfo));
+        });
+    },
+    toHtml: function () {
+        var deviceIds = Object.keys(this.devices);
+
+        var self = this;
+        var flash_views = deviceIds.map(function (id) {
+            return self.devices[id].toHtml()
+        });
+
+        return '<ul id="flash-list">' + flash_views.join() + '</ul>';
     }
 };
 
-function USBDevice(attributes) {
-    this.deviceId = attributes.id;
+function USBDevice(id, attributes) {
+    this.deviceId = id;
     this.info = attributes;
 }
 
 USBDevice.prototype = {
+    getId: function () {
+        return this.deviceId;
+    },
     getInfo: function () {
         return this.info;
+    },
+    getSizeGb: function () {
+        var sizeInBytes = this.info.Size;
+        return (sizeInBytes / 1024 * 1024 * 1024).toFixed(3)
+    },
+    toHtml: function () {
+        return '<li data-id="' + this.info['VolumeSerialNumber'] + '">'
+            + '<span class="usb-name">' + this.info['VolumeSerialNumber'] + '</span>'
+            + '<span class="usb-format">' + this.info['FileSystem'] + '</span>'
+            + '<span class="usb-size">' + this.getSizeGb() + ' Gb</span>' +
+            // +'<span class="usb-actions">' + this.info['VolumeSerialNumber'] + '</span>'
+            +'</li>'
     }
 };
 
 $(function () {
-
     Events.on('WebSocket.connected', function () {
         devicesList = new DevicesList();
         Events.on('message', processMessage);

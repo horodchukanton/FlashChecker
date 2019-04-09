@@ -8,5 +8,8 @@ var OPTIONS = {
 </script>
 
 <div id="debug"></div>
+<div id="flash-container">
+<ul id="flash-list"></ul>
+</div>
 <script src="/js/flash_checker.js"></script>
 

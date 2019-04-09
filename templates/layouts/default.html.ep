@@ -12,5 +12,6 @@
 <script src="/js/bootstrap.min.js"></script>
 <script src="/js/events.js"></script>
 <script src="/js/websocket_client.js"></script>
+<script src="/js/mustache.min.js"></script>
 </body>
 </html>
