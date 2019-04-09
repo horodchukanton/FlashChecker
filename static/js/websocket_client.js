@@ -1,18 +1,17 @@
 'use strict';
 
 var WSClient = function (socket_link) {
-    this.link = socket_link;
+    if (!socket_link){
+        console.log('[ WebSocket ] Will not connect to socket without an URL.');
+    }
 
+    this.link = socket_link;
     this.is_in_connection_retrieval = true;
     this.unsuccessful_connection_tries = 0;
 
-    if (socket_link !== '') {
-        this.link = socket_link;
-        this.ws = this.try_to_connect_again_in_(0);
-    } else {
-        console.log('[ WebSocket ] Will not connect to socket without $conf{WEBSOCKET_URL}. It\'s normal if you haven\'t configured WebSockets');
-    }
+    this.ws = this.try_to_connect_again_in_(0);
 };
+
 WSClient.prototype = {
     send: function (message) {
         this.ws.send(JSON.stringify(message))
@@ -121,9 +120,9 @@ WSClient.prototype = {
         });
 
         this.ping();
-    },
+    }
 };
 document.onunload = function () {
-    ws.request_close_socket()
+    ws.request_close_socket();
     ws.unsuccessful_connection_tries = 1000;
 };

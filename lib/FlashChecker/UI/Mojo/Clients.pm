@@ -38,9 +38,9 @@ sub on_message {
 
     # Technical handlers
     if ($hash->{type} eq 'confirm' && $hash->{seq}) {
+        my $confirm_action = $delivery_confirm{$hash->{seq}}->{confirm_sub};
         delete $delivery_confirm{$hash->{seq}};
 
-        my $confirm_action = $delivery_confirm{$hash->{seq}}->{confirm_sub};
         return unless $confirm_action;
 
         if (ref $confirm_action eq 'CODE') {
@@ -87,11 +87,13 @@ sub config {
 
 sub add {
     my ( $self, $tx ) = @_;
-    my $id = Digest::SHA1->sha1_base64('' . $tx);
+
+    my $id = $tx->connection();
 
     if (! $self->{clients}->{$id}) {
         $self->{clients}->{$id} = $tx;
     }
+
     return $id;
 }
 
@@ -123,17 +125,24 @@ sub disconnected {
         return 0;
     }
 
+    # Remove all confirmations for disconnected client
+    delete @delivery_confirm{@{_undelivered_messages_for($cl)}};
+
     delete $self->{clients}->{$cl};
     return 1;
 }
 
 sub send_message {
     my ( $self, $cl_id, $msg, $confirm_sub ) = @_;
+    return unless $cl_id;
 
     $msg->{seq} = $msg_num ++;
     $delivery_confirm{$msg->{seq}} = {
+        type        => $msg->{type},
+        ttl         => $msg->{ttl},
+        ts          => $msg->{ts},
         client      => $cl_id,
-        confirm_sub => $confirm_sub
+        confirm_sub => $confirm_sub,
     };
 
     my $json;
@@ -171,12 +180,31 @@ sub notify_all {
 sub _continious_ping {
     my ( $self ) = @_;
 
-    # $log->debug("every $self->{ping_period}. PING: " . $self->count() . "");
+    # Check for failed ping
+    for my $seq_id (keys %delivery_confirm) {
+        next if (! exists $delivery_confirm{$seq_id} || ! $delivery_confirm{$seq_id}->{type});
+        next if $delivery_confirm{$seq_id}->{type} ne 'ping';
+
+        my $msg = $delivery_confirm{$seq_id};
+        if (time() - $msg->{ts} >= $msg->{ttl}) {
+            $log->info("Client disconnected by timeout $msg->{client}");
+            $self->disconnected($msg->{client});
+        }
+    }
 
     $self->{pinger} = Mojo::IOLoop->timer($self->{ping_period} => sub {
-        $self->notify_all({ type => 'ping' });
+        $self->notify_all({ type => 'ping', ts => => time(), ttl => 3 * $self->{ping_period} });
         $self->_continious_ping();
     });
+}
+
+sub _undelivered_messages_for {
+    my ( $cl_id ) = @_;
+    my @seq_ids = grep {
+        $delivery_confirm{$_}->{client} eq $cl_id
+    } keys %delivery_confirm;
+
+    return \@seq_ids;
 }
 
 END {

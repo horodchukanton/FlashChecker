@@ -139,7 +139,6 @@ sub new_device_connected {
     my ( $self, $device_id ) = @_;
 
     my $info = $self->listener->get_device_info($device_id);
-    $log->debug("Failed to get info for: ", $info);
 
     $self->clients->notify_all({
         type   => 'connected',
