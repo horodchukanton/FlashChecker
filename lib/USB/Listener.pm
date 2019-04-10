@@ -11,6 +11,8 @@ use USB::_Execute qw/execute/;
 use Data::Dumper;
 use Carp;
 
+my $WIN_ATTRS = 'filesystem,size,volumeserialnumber,deviceid,filesystem,description';
+
 sub new {
     my ( $class, %params ) = @_;
     my $self = {
@@ -122,7 +124,8 @@ sub get_device_info {
 }
 
 sub get_devices_win {
-    my $cmd = 'wmic logicaldisk where drivetype=2 get deviceid,volumeserialnumber /FORMAT:list';
+    my $cmd = 'wmic logicaldisk where drivetype=2 '
+        . "get ${WIN_ATTRS} /FORMAT:list";
     my $cmd_result = execute($cmd, "List of the devices");
 
     my $list = _parse_win_keypairs($cmd_result);
@@ -134,7 +137,7 @@ sub get_info_win {
     my ( $device_id ) = @_;
 
     my $cmd = qq{wmic logicaldisk where "drivetype=2 and volumeserialnumber=\"$device_id\"" }
-        . q{get filesystem,size,volumeserialnumber,deviceid,filesystem,description /FORMAT:list};
+        . qq{get ${WIN_ATTRS} /FORMAT:list};
 
     my $list = execute($cmd, "Device info");
 
@@ -158,17 +161,23 @@ sub _parse_win_keypairs {
     my @result = ();
     # Windows returns the list starting with 'DeviceID=G:'
 
+    # Remove empty lines
+    while ($cmd_output->[0] eq '') {
+        shift(@$cmd_output)
+    }
+
+    # Result should go in the same order, get name of the first pair
+    my $first_name = (split('=', $cmd_output->[0], 2))[0];
+
     my %current_device_opts = ();
     for (@$cmd_output) {
         next unless $_;
-
         my ( $name, $value ) = split('=', $_, 2);
 
         # Next device started
-        if (%current_device_opts && $name eq 'DeviceID') {
-            $current_device_opts{DeviceID} = $value;
-            push @result, \%current_device_opts;
-            %current_device_opts = ();
+        if ($name eq $first_name && %current_device_opts) {
+            push @result, {%current_device_opts};
+            %current_device_opts = ($first_name => $value);
             next;
         }
 
@@ -176,7 +185,7 @@ sub _parse_win_keypairs {
     }
 
     # Saving last one (if any keys are present)
-    if ($current_device_opts{DeviceID}) {
+    if ($current_device_opts{$first_name}) {
         push @result, \%current_device_opts;
     }
 

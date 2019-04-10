@@ -8,7 +8,7 @@ function processMessage(message) {
 
     switch (message['type']) {
         case 'connected':
-            var device = new USBDevice(message['id'], message['device']);
+            var device = new USBDevice(message['DeviceID'], message['device']);
             console.log(device);
             devicesList.add(device);
             break;
@@ -43,25 +43,33 @@ DevicesList.prototype = {
     renew: function (deviceInfoList) {
         var self = this;
         deviceInfoList.forEach(function (devInfo) {
-            var id = devInfo['VolumeSerialNumber'];
+            var id = devInfo['DeviceID'];
             self.add(new USBDevice(id, devInfo));
         });
     },
     toHtml: function () {
         var deviceIds = Object.keys(this.devices);
 
-        var self = this;
-        var flash_views = deviceIds.map(function (id) {
-            return self.devices[id].toHtml()
-        });
+        var flash_views;
+        if (deviceIds.length > 0) {
+            var self = this;
+            flash_views = deviceIds.map(function (id) {
+                return self.devices[id].toHtml()
+            });
+        } else {
+            flash_views = ['No devices connected']
+        }
 
-        return '<ul id="flash-list">' + flash_views.join() + '</ul>';
+        return '<ul id="flash-list">' + flash_views.join('') + '</ul>';
     }
 };
 
 function USBDevice(id, attributes) {
     this.deviceId = id;
     this.info = attributes;
+
+    this.template = $('#usb-template').html();
+    Mustache.parse(this.template);
 }
 
 USBDevice.prototype = {
@@ -73,15 +81,21 @@ USBDevice.prototype = {
     },
     getSizeGb: function () {
         var sizeInBytes = this.info.Size;
-        return (sizeInBytes / 1024 * 1024 * 1024).toFixed(3)
+        var inKb = sizeInBytes / 1024;
+        var inMb = inKb / 1024;
+        var inGb = inMb / 1024;
+        return inGb.toFixed(2) + 'Gb';
+    },
+    getActions: function () {
+
     },
     toHtml: function () {
-        return '<li data-id="' + this.info['VolumeSerialNumber'] + '">'
-            + '<span class="usb-name">' + this.info['VolumeSerialNumber'] + '</span>'
-            + '<span class="usb-format">' + this.info['FileSystem'] + '</span>'
-            + '<span class="usb-size">' + this.getSizeGb() + ' Gb</span>' +
-            // +'<span class="usb-actions">' + this.info['VolumeSerialNumber'] + '</span>'
-            +'</li>'
+        return Mustache.render(this.template, {
+            id: this.getId(),
+            name: this.info['Description'],
+            format: this.info['FileSystem'],
+            size: this.getSizeGb()
+        })
     }
 };
 

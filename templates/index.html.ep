@@ -7,9 +7,44 @@ var OPTIONS = {
 }
 </script>
 
-<div id="debug"></div>
+<div class="container">
+<div class="row">
+<div class="col-md-12">
 <div id="flash-container">
 <ul id="flash-list"></ul>
 </div>
+</div>
+<div class="col-md-12"><div id="debug"></div>
+</div>
+</div>
+</div>
+
+<script id="usb-template" type="x-tmpl-mustache">
+<div class="row usb-device" data-id="{{ id }}">
+  <div class="panel panel-success">
+    <div class="panel-heading">
+      <h3 class="panel-title usb-name">{{ name }} ( {{ id }} )</h3>
+    </div>
+    <div class="panel-body">
+      <div class="row">
+        <div class="col-sm-3 pull-left usb-format">{{ format }}</div>
+        <div class="col-sm-3 pull-right usb-size">{{ size }}</div>
+      </div>
+      <div class="row">
+        <div class="col-md-12">
+         <div class="progress" style="margin-bottom:0">
+          <div class="progress-bar progress-bar-success"></div>
+         </div>
+        </div>
+      </div>
+    </div>
+    <div class="panel-footer usb-actions">
+      <button class="btn btn-primary btn-format" disabled>Format</button>
+      <button class="btn btn-primary btn-check" disabled>Check</button>
+    </div>
+  </div>
+</div>
+</script>
+
 <script src="/js/flash_checker.js"></script>
 
