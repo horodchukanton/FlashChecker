@@ -8,9 +8,7 @@ function processMessage(message) {
 
     switch (message['type']) {
         case 'connected':
-            var device = new USBDevice(message['DeviceID'], message['device']);
-            console.log(device);
-            devicesList.add(device);
+            devicesList.add(DevicesList.prototype.createUsbDevice(message['device']));
             break;
         case 'removed':
             devicesList.remove(message['id']);
@@ -34,6 +32,10 @@ function DevicesList() {
 }
 
 DevicesList.prototype = {
+    createUsbDevice: function (devInfo) {
+        var id = devInfo['VolumeSerialNumber'];
+        return new USBDevice(id, devInfo);
+    },
     add: function (usbDevice) {
         this.devices[usbDevice.getId()] = usbDevice;
     },
@@ -43,8 +45,7 @@ DevicesList.prototype = {
     renew: function (deviceInfoList) {
         var self = this;
         deviceInfoList.forEach(function (devInfo) {
-            var id = devInfo['DeviceID'];
-            self.add(new USBDevice(id, devInfo));
+            self.add(self.createUsbDevice(devInfo));
         });
     },
     toHtml: function () {
