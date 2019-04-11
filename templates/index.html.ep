@@ -23,7 +23,7 @@ var OPTIONS = {
 <div class="row usb-device" data-id="{{ id }}">
   <div class="panel panel-success">
     <div class="panel-heading">
-      <h3 class="panel-title usb-name">{{ name }} ( {{ id }} )</h3>
+      <h3 class="panel-title usb-name">{{ name }} ( {{ root }} )</h3>
     </div>
     <div class="panel-body">
       <div class="row">

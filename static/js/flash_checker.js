@@ -91,7 +91,7 @@ USBDevice.prototype = {
 
     },
     getRootName: function () {
-        return this.info['DeviceId'];
+        return this.info['DeviceID'];
     },
     getDescription: function () {
         return this.info['Description'];
