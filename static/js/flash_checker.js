@@ -89,10 +89,17 @@ USBDevice.prototype = {
     getActions: function () {
 
     },
+    getRootName: function () {
+        return this.info['DeviceId'];
+    },
+    getDescription: function () {
+        return this.info['Description'];
+    },
     toHtml: function () {
         return Mustache.render(this.template, {
             id: this.getId(),
-            name: this.info['Description'],
+            root: this.getRootName(),
+            name: this.getDescription(),
             format: this.info['FileSystem'],
             size: this.getSizeGb()
         })

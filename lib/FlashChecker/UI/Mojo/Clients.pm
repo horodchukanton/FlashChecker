@@ -12,6 +12,7 @@ use Carp;
 
 use Mojo::Log;
 my $log = Mojo::Log->new;
+my $Json = Cpanel::JSON::XS::->new->utf8(0)->pretty(0);
 
 my %delivery_confirm = ();
 my $msg_num = 1;
@@ -147,7 +148,7 @@ sub send_message {
 
     my $json;
     eval {
-        $json = encode_json($msg);
+        $json = $Json->encode($msg);
         1;
     } or do {
         print "to JSON:" . Dumper $msg;

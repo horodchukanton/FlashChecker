@@ -127,8 +127,10 @@ sub get_devices_win {
     my $cmd = 'wmic logicaldisk where drivetype=2 '
         . "get ${WIN_ATTRS} /FORMAT:list";
     my $cmd_result = execute($cmd, "List of the devices");
+    return [] unless (scalar @$cmd_result);
 
     my $list = _parse_win_keypairs($cmd_result);
+
     return [ map {$_->{id} = $_->{VolumeSerialNumber};
         $_} @$list ]
 }
@@ -167,7 +169,7 @@ sub _parse_win_keypairs {
     }
 
     # Result should go in the same order, get name of the first pair
-    my $first_name = (split('=', $cmd_output->[0], 2))[0];
+    my $first_name = ( split('=', $cmd_output->[0], 2) )[0];
 
     my %current_device_opts = ();
     for (@$cmd_output) {
@@ -176,8 +178,8 @@ sub _parse_win_keypairs {
 
         # Next device started
         if ($name eq $first_name && %current_device_opts) {
-            push @result, {%current_device_opts};
-            %current_device_opts = ($first_name => $value);
+            push @result, { %current_device_opts };
+            %current_device_opts = ( $first_name => $value );
             next;
         }
 
@@ -187,6 +189,12 @@ sub _parse_win_keypairs {
     # Saving last one (if any keys are present)
     if ($current_device_opts{$first_name}) {
         push @result, \%current_device_opts;
+    }
+
+    # Description can contain UTF-8 characters
+    for (@result){
+        $_->{Description} = Encode::decode_utf8($_->{Description})
+            if ($_->{Description});
     }
 
     return \@result;
