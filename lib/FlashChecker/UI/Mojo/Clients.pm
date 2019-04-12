@@ -87,9 +87,20 @@ sub config {
 }
 
 sub add {
-    my ( $self, $tx ) = @_;
+    my ( $self, $mojo, $tx ) = @_;
 
     my $id = $tx->connection();
+
+    # TODO: refactor
+    if (my $prev = $mojo->cookie('tx')) {
+        if ($prev ne $id) {
+            $self->disconnected($prev);
+        }
+        $mojo->cookie('tx' => $id);
+    }
+    else {
+        $mojo->cookie('tx' => $id);
+    }
 
     if (! $self->{clients}->{$id}) {
         $self->{clients}->{$id} = $tx;

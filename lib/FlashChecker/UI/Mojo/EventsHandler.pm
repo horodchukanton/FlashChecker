@@ -52,7 +52,7 @@ sub listener {
 sub websocket_message {
     my ( $self, $mojo ) = @_;
 
-    my $cl_id = $self->clients->add($mojo->tx);
+    my $cl_id = $self->clients->add($mojo, $mojo->tx);
 
     $mojo->on(
         json   => sub {
