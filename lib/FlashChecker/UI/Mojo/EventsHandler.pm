@@ -125,7 +125,7 @@ sub process_events {
         }
         elsif ($event->{type} eq 'connected') {
             return unless $event->{id};
-            $self->new_device_connected($event->{id});
+            $self->new_device_connected($event->{device});
         }
         else {
             $log->debug("Unknown event: " . Dumper($event) . "");
@@ -136,14 +136,12 @@ sub process_events {
 }
 
 sub new_device_connected {
-    my ( $self, $device_id ) = @_;
-
-    my $info = $self->listener->get_device_info($device_id);
+    my ( $self, $device_info ) = @_;
 
     $self->clients->notify_all({
         type   => 'connected',
-        id     => $device_id,
-        device => $info
+        id     => $device_info->{id},
+        device => $device_info
     });
 
     return 1;

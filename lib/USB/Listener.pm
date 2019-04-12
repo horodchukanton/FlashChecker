@@ -6,48 +6,51 @@ use threads;
 use threads::shared qw/share/;
 use Thread::Queue;
 
-use USB::_Execute qw/execute/;
-
 use Data::Dumper;
 use Carp;
 
-my $WIN_ATTRS = 'filesystem,size,volumeserialnumber,deviceid,filesystem,description';
+use USB::Devices;
+
+my @devices;
+my %devices_by_id;
+my Thread::Queue $events_queue :shared;
+
+# Listener thread
+my threads $listener;
 
 sub new {
     my ( $class, %params ) = @_;
     my $self = {
-        devices      => [],
-        events_queue => undef,
+        system => USB::Devices->new(),
         %params
     };
     bless $self, $class;
-
-    $self->{os} ||= ( $^O =~ 'MSWin32' ) ? 'win' : 'lin';
-
     return $self;
 }
 
+#@returns Thread::Queue
 sub listen {
     my ( $self, %params ) = @_;
     my $period = $params{period} || 5;
 
     # Get initial list
-    $self->{devices} = $self->get_list_of_devices() unless @{$self->{devices}};
-    $self->{events_queue} = Thread::Queue->new({ type => 'start' });
+    $self->update_list_of_devices(
+        $self->system->get_list_of_devices()
+    );
 
     # Start a thread
     print "Starting a USB::Listener thread\n" if ($self->{debug});
-    $self->{listener} = threads::async sub {listener_thread($self, $period)};
-    # $self->{listener}->detach();
 
-    return $self->{events_queue};
+    $events_queue = Thread::Queue->new({ type => 'start' });
+    $listener = threads::async sub {listener_thread($self, $period)};
+
+    return $events_queue;
 }
 
 sub stop {
-    my ( $self ) = @_;
     print "Stopping USB::Listener thread\n";
-    $self->{listener}->kill();
-    $self->{listener}->detach();
+    $listener->kill();
+    $listener->detach();
 
 }
 
@@ -63,10 +66,9 @@ sub listener_thread {
 sub check_for_changed_devices {
     my ( $self ) = @_;
 
-    my $queue = $self->{events_queue};
-    my @old_ids = map {$_->{id}} @{$self->{devices}};
+    my @old_ids = map {$_->{id}} @devices;
 
-    my $new_list = $self->get_list_of_devices();
+    my $new_list = $self->system->get_list_of_devices();
     my @new_ids = map {$_->{id}} @{$new_list};
 
     my ( $changed, $created, $removed ) = _compare_lists(\@old_ids, \@new_ids);
@@ -77,11 +79,26 @@ sub check_for_changed_devices {
             print "Device disconnected: $_.  \n" for @$removed;
         }
 
-        $queue->enqueue({ type => 'connected', id => $_ }) for @$created;
-        $queue->enqueue({ type => 'removed', id => $_ }) for @$removed;
+        if (@$created) {
+            # Map by id
+            my %new_device_ids = map {$_ => 1} @$created;
+            for (@$new_list) {
+                next unless ($new_device_ids{$_->{id}});
+                $events_queue->enqueue({
+                    type   => 'connected',
+                    id     => $_->{id},
+                    device => $_
+                });
+            }
+        }
+        if (@$removed) {
+            $events_queue->enqueue({
+                type => 'removed', id => $_
+            }) for @$removed;
+        }
     }
 
-    $self->{devices} = $new_list;
+    $self->update_list_of_devices($new_list);
 }
 
 sub _compare_lists {
@@ -103,106 +120,32 @@ sub _compare_lists {
     return( 1, \@created, \@removed );
 }
 
+
 sub get_list_of_devices {
-    my ( $self ) = @_;
-
-    my $list = ( $self->{os} eq 'win' )
-        ? get_devices_win()
-        : get_devices_lin();
-
-    return $list;
+    return [ @devices ];
 }
 
 sub get_device_info {
-    my ( $self, $device_id ) = @_;
-
-    my $info = ( $self->{os} eq 'win' )
-        ? get_info_win($device_id)
-        : get_info_lin($device_id);
-
-    return $info->[0];
-}
-
-sub get_devices_win {
-    my $cmd = 'wmic logicaldisk where drivetype=2 '
-        . "get ${WIN_ATTRS} /FORMAT:list";
-    my $cmd_result = execute($cmd, "List of the devices");
-    return [] unless (scalar @$cmd_result);
-
-    my $list = _parse_win_keypairs($cmd_result);
-
-    return [ map {$_->{id} = $_->{VolumeSerialNumber};
-        $_} @$list ]
-}
-
-sub get_info_win {
-    my ( $device_id ) = @_;
-
-    my $cmd = qq{wmic logicaldisk where "drivetype=2 and volumeserialnumber=\"$device_id\"" }
-        . qq{get ${WIN_ATTRS} /FORMAT:list};
-
-    my $list = execute($cmd, "Device info");
-
-    return _parse_win_keypairs($list);
+    my ( undef, $device_id ) = @_;
+    return $devices_by_id{$device_id};
 }
 
 
-sub get_devices_lin {
-    my $cmd = q{ls -1 /dev/disk/by-id/ | grep -v -E '\-part[0-9]+$' | grep '^usb'};
-    return execute($cmd, "List of the devices");
-
-}
-
-sub get_info_lin {
-    die "get_info_lin Unimplemented";
-}
-
-sub _parse_win_keypairs {
-    my ( $cmd_output ) = @_;
-
-    my @result = ();
-    # Windows returns the list starting with 'DeviceID=G:'
-
-    # Remove empty lines
-    while ($cmd_output->[0] eq '') {
-        shift(@$cmd_output)
+sub update_list_of_devices {
+    my ( $self, $new_devices ) = @_;
+    for (@$new_devices){
+        $devices_by_id{$_} = $_;
     }
+    @devices = @$new_devices;
+}
 
-    # Result should go in the same order, get name of the first pair
-    my $first_name = ( split('=', $cmd_output->[0], 2) )[0];
-
-    my %current_device_opts = ();
-    for (@$cmd_output) {
-        next unless $_;
-        my ( $name, $value ) = split('=', $_, 2);
-
-        # Next device started
-        if ($name eq $first_name && %current_device_opts) {
-            push @result, { %current_device_opts };
-            %current_device_opts = ( $first_name => $value );
-            next;
-        }
-
-        $current_device_opts{$name} = $value;
-    }
-
-    # Saving last one (if any keys are present)
-    if ($current_device_opts{$first_name}) {
-        push @result, \%current_device_opts;
-    }
-
-    # Description can contain UTF-8 characters
-    for (@result){
-        $_->{Description} = Encode::decode_utf8($_->{Description})
-            if ($_->{Description});
-    }
-
-    return \@result;
+#@returns USB::Devices
+sub system {
+    return shift->{system};
 }
 
 DESTROY{
-    my $self = shift;
-    $self->{listener}->detach();
+    $listener->detach();
 }
 
 1;
