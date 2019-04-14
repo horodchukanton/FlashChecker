@@ -20,13 +20,17 @@ sub run {
     my ( %params ) = @_;
 
     init();
+    my $config = $params{config}->{Listen};
+
+    my $host = $config->{Address} || '*';
+    my $port = $config->{Port} || '8080';
 
     $handler->start(%params);
 
     return app->start(
-        'daemon', 'morbo', '-l' => 'http://*:8080',
+        'daemon', '-l' => "http://$host:$port",
         'home'                  => $cwd,
-        %{$params{UI}->{Mojo} ? $params{UI}->{Mojo} : {}}
+        %{$config->{Mojo} ? $config->{Mojo} : {}}
     );
 }
 
@@ -41,14 +45,30 @@ sub init {
 
 
 sub define_routes {
-    websocket '/ws' => sub {
+    websocket('/ws' => sub {
         $handler->websocket_message(shift)
-    };
+    });
 
-    get '/' => sub {
+    post('/command/:issuer' => sub {
+        my Mojolicious::Controller $c = shift;
+
+        my $token = $c->param('issuer');
+
+        my Mojo::Asset::File $body = $c->req->content->asset;
+
+        print Dumper $body;
+
+        my $bytes = $body->slurp();
+
+        $handler->executor_response($token, $bytes);
+
+        $c->render(text => 'No content', status => 204);
+    });
+
+    get('/' => sub {
         my $c = shift;
         $c->render(template => 'index');
-    };
+    });
 }
 
 

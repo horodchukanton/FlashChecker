@@ -33,7 +33,7 @@ function DevicesList() {
 
 DevicesList.prototype = {
     createUsbDevice: function (devInfo) {
-        var id = devInfo['VolumeSerialNumber'];
+        var id = devInfo['DeviceID'];
         return new USBDevice(id, devInfo);
     },
     add: function (usbDevice) {
@@ -61,7 +61,7 @@ DevicesList.prototype = {
             flash_views = ['No devices connected']
         }
 
-        return '<ul id="flash-list">' + flash_views.join('') + '</ul>';
+        return '<div id="flash-list" class="">' + flash_views.join('') + '</div>';
     }
 };
 
@@ -108,7 +108,10 @@ USBDevice.prototype = {
 };
 
 $(function () {
-    Events.on('WebSocket.connected', function () {
+    Events.on('WebSocket.error', function () {
+       console.log('error');
+    });
+    Events.once('WebSocket.connected', function () {
         devicesList = new DevicesList();
         Events.on('message', processMessage);
         ws.send({type: 'request_list'});

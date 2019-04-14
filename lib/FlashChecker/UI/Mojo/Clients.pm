@@ -50,8 +50,6 @@ sub on_message {
     }
     elsif ($hash->{type} eq 'disconnect') {
         $self->disconnected($cl_id);
-        $mojo_->finish(1000);
-        $log->debug('Client ' . $cl_id . ' disconnected');
     }
     elsif ($hash->{type} eq 'ping') {
         $self->send_message($cl_id, { type => 'pong' })
@@ -90,19 +88,16 @@ sub add {
     my ( $self, $mojo, $tx ) = @_;
 
     my $id = $tx->connection();
-
-    # TODO: refactor
-    if (my $prev = $mojo->cookie('tx')) {
-        if ($prev ne $id) {
-            $self->disconnected($prev);
-        }
-        $mojo->cookie('tx' => $id);
-    }
-    else {
-        $mojo->cookie('tx' => $id);
-    }
+    # my $prev = $mojo->cookie('tx');
+    #
+    # if ($self->{clients}->{$prev}) {
+    #     # Old client with new connection
+    #     $self->disconnected($prev);
+    # }
 
     if (! $self->{clients}->{$id}) {
+        # New client
+        # $mojo->cookie('tx' => $id);
         $self->{clients}->{$id} = $tx;
     }
 

@@ -29,6 +29,7 @@ sub start {
     my $config = $params{config};
 
     $self->{period} = $config->{USB}->{Poll} || 3;
+    $self->{actions} = $config->{Actions}
     $self->{params} = \%params;
 
     $self->check_queue($params{queue});
@@ -85,6 +86,12 @@ sub websocket_message {
     );
 
     return 1;
+}
+
+sub executor_response {
+    my ( $self, $token, $response ) = @_;
+
+    print "CLIENT: $token\n SENT: $response\n";
 }
 
 sub check_queue {

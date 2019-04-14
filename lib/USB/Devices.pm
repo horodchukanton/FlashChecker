@@ -43,14 +43,14 @@ sub get_devices_win {
 
     my $list = _parse_win_keypairs($cmd_result);
 
-    return [ map {$_->{id} = $_->{VolumeSerialNumber};
+    return [ map {$_->{id} = $_->{DeviceID};
         $_} @$list ]
 }
 
 sub get_info_win {
     my ( $device_id ) = @_;
 
-    my $cmd = qq{wmic logicaldisk where "drivetype=2 and volumeserialnumber=\"$device_id\"" }
+    my $cmd = qq{wmic logicaldisk where "drivetype=2 and deviceid=\"$device_id\"" }
         . qq{get ${WIN_ATTRS} /FORMAT:list};
 
     my $list = execute($cmd, "Device info");
@@ -72,8 +72,6 @@ sub get_info_lin {
 sub _parse_win_keypairs {
     my ( $cmd_output ) = @_;
 
-    my @result = ();
-    # Windows returns the list starting with 'DeviceID=G:'
 
     # Remove empty lines
     while ($cmd_output->[0] eq '') {
@@ -82,6 +80,8 @@ sub _parse_win_keypairs {
 
     # Result should go in the same order, get name of the first pair
     my $first_name = ( split('=', $cmd_output->[0], 2) )[0];
+
+    my @result = ();
 
     my %current_device_opts = ();
     for (@$cmd_output) {

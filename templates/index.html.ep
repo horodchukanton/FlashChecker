@@ -10,9 +10,7 @@ var OPTIONS = {
 <div class="container">
 <div class="row">
 <div class="col-md-12">
-<div id="flash-container">
-<ul id="flash-list"></ul>
-</div>
+<div id="flash-container"></div>
 </div>
 <div class="col-md-12"><div id="debug"></div>
 </div>
@@ -20,7 +18,7 @@ var OPTIONS = {
 </div>
 
 <script id="usb-template" type="x-tmpl-mustache">
-<div class="row usb-device" data-id="{{ id }}">
+<div class="col-md-6 usb-device" data-id="{{ id }}">
   <div class="panel panel-success">
     <div class="panel-heading">
       <h3 class="panel-title usb-name">{{ name }} ( {{ root }} )</h3>

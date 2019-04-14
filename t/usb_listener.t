@@ -17,12 +17,11 @@ my $devices = $listener->get_list_of_devices();
 
 print "Initial count of the devices: " . scalar @$devices . "\n";
 
-$listener->listen(period => 1);
+my $queue = $listener->listen(period => 1);
 my $i = 10;
 while ($i--){
     sleep 1;
-    print Dumper ($listener->{events_queue}->dequeue()) if ($listener->{events_queue}->pending());
-
+    print Dumper ($queue->dequeue_nb()) if ($queue->pending());
 }
 
 
