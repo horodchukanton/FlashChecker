@@ -130,11 +130,10 @@ sub get_device_info {
     return $devices_by_id{$device_id};
 }
 
-
 sub update_list_of_devices {
     my ( $self, $new_devices ) = @_;
     for (@$new_devices){
-        $devices_by_id{$_} = $_;
+        $devices_by_id{$_->{id}} = $_;
     }
     @devices = @$new_devices;
 }
