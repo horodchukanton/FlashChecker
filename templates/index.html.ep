@@ -37,8 +37,11 @@ var OPTIONS = {
       </div>
     </div>
     <div class="panel-footer usb-actions">
-      <button class="btn btn-primary btn-format" disabled>Format</button>
-      <button class="btn btn-primary btn-check" disabled>Check</button>
+    {{#actions}}
+      <button type="button" class="btn btn-primary btn-action"
+       data-deviceId="{{ id }}" data-action="{{.}}"
+       >{{.}}</button>
+    {{/actions}}
     </div>
   </div>
 </div>

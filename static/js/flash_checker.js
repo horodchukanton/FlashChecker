@@ -1,6 +1,8 @@
 'use strict';
 var ws = null;
 var devicesList = null;
+var usbTemplate = null;
+var operations = null
 
 function processMessage(message) {
     var debugStr = $('<p>').text(JSON.stringify(message));
@@ -23,9 +25,34 @@ function processMessage(message) {
             console.log("I'm not very smart indeed :)" + JSON.stringify(message))
     }
 
-    $('div#flash-container').html(devicesList.toHtml());
+    var $devicesHtml = $('div#flash-container');
+    $devicesHtml.html(devicesList.toHtml());
+    $devicesHtml.find('button.btn-action').on('click', function () {
+        var $this = $(this);
+        var deviceId = $this.attr('data-deviceId');
+        var action = $this.attr('data-action');
 
+        console.log("Clicked: %s, %s", deviceId, action);
+
+        operations.invokeAction(action, deviceId);
+    });
 }
+
+function Operations() {
+}
+
+Operations.prototype = {
+    invokeAction: function (action, deviceId) {
+        if (!action && deviceId) {
+            alert("No action or deviceID")
+        }
+        ws.send({
+            type: 'action_request',
+            action: action,
+            device_id: deviceId
+        })
+    }
+};
 
 function DevicesList() {
     this.devices = {};
@@ -68,9 +95,6 @@ DevicesList.prototype = {
 function USBDevice(id, attributes) {
     this.deviceId = id;
     this.info = attributes;
-
-    this.template = $('#usb-template').html();
-    Mustache.parse(this.template);
 }
 
 USBDevice.prototype = {
@@ -88,7 +112,7 @@ USBDevice.prototype = {
         return inGb.toFixed(2) + 'Gb';
     },
     getActions: function () {
-
+        return this.info['Actions'];
     },
     getRootName: function () {
         return this.info['DeviceID'];
@@ -97,27 +121,36 @@ USBDevice.prototype = {
         return this.info['Description'];
     },
     toHtml: function () {
-        return Mustache.render(this.template, {
+        return Mustache.render(usbTemplate, {
             id: this.getId(),
             root: this.getRootName(),
             name: this.getDescription(),
             format: this.info['FileSystem'],
-            size: this.getSizeGb()
-        })
+            size: this.getSizeGb(),
+            actions: this.getActions()
+        });
     }
 };
 
 $(function () {
     Events.on('WebSocket.error', function () {
-       console.log('error');
+        console.log('error');
     });
+
     Events.once('WebSocket.connected', function () {
         devicesList = new DevicesList();
+        operations = new Operations();
+
         Events.on('message', processMessage);
         ws.send({type: 'request_list'});
     });
 
+    // Connecting to the server
     ws = new WSClient(OPTIONS['websocket_url']);
+
+    // Parsing USB template
+    usbTemplate = $('#usb-template').html();
+    Mustache.parse(usbTemplate);
 });
 
 document.onunload = function () {
