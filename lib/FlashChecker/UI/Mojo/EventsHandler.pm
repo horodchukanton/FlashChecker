@@ -29,7 +29,7 @@ sub start {
     my $config = $params{config};
 
     $self->{period} = $config->{USB}->{Poll} || 3;
-    $self->{actions} = $config->{Actions}
+    $self->{actions} = $config->{Actions};
     $self->{params} = \%params;
 
     $self->check_queue($params{queue});
@@ -64,23 +64,7 @@ sub websocket_message {
             return if (! $operation_message);
 
             my ( undef, $hash ) = @_;
-
-            if ('request_list' eq $hash->{type}) {
-                $clients->send_message($cl_id, {
-                    type    => 'list',
-                    devices => $self->listener->get_list_of_devices()
-                });
-            }
-            elsif ('request_info' eq $hash->{type}) {
-                unless ($hash->{device_id}) {
-                    $log->warn("No device id to return info");
-                    return;
-                }
-                $clients->send_message($cl_id, {
-                    type    => 'device',
-                    devices => $self->listener->get_device_info($hash->{device_id})
-                });
-            }
+            $self->_on_command_message($cl_id, $hash);
         },
         finish => sub {$self->clients->disconnected($cl_id)}
     );
@@ -88,10 +72,58 @@ sub websocket_message {
     return 1;
 }
 
+sub _on_command_message {
+    my ( $self, $cl_id, $msg ) = @_;
+
+    if ('request_list' eq $msg->{type}) {
+
+        my $list = $self->listener->get_list_of_devices();
+        my @with_actions = map {$_->{Actions} = $self->get_actions($_->{id});
+            $_} @$list;
+
+        $self->clients->send_message($cl_id, {
+            type    => 'list',
+            devices => \@with_actions
+        });
+    }
+    elsif ('get_actions' eq $msg->{type}) {
+        $self->clients->send_message($cl_id, {
+            type    => 'list',
+            devices => $self->get_actions($msg->{deviceID})
+        });
+    }
+    elsif ('request_info' eq $msg->{type}) {
+        unless ($msg->{device_id}) {
+            $log->warn("No device id to return info");
+            return;
+        }
+        $self->clients->send_message($cl_id, {
+            type    => 'device',
+            devices => $self->listener->get_device_info($msg->{device_id})
+        });
+    }
+}
+
 sub executor_response {
     my ( $self, $token, $response ) = @_;
 
     print "CLIENT: $token\n SENT: $response\n";
+}
+
+
+sub get_actions {
+    my ( $self, $device_id ) = @_;
+
+    my %all_actions = %{$self->{actions}};
+
+    my $device = $self->listener->get_device_info($device_id);
+
+    # 'Check' requires device to be mounted
+    if (! $device->{VolumeSerialNumber}) {
+        delete $all_actions{Check};
+    }
+
+    return [ sort keys %all_actions ];
 }
 
 sub check_queue {
