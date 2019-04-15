@@ -13,7 +13,7 @@ use Data::Dumper;
 
 use FlashChecker::UI::Mojo::EventsHandler;
 
-my $handler = FlashChecker::UI::Mojo::EventsHandler->new();
+my $handler = undef;
 my $cwd = dirname(abs_path($0));
 
 sub run {
@@ -22,14 +22,15 @@ sub run {
     init();
     my $config = $params{config}->{Listen};
 
+    $handler = FlashChecker::UI::Mojo::EventsHandler->new($params{config});
+    $handler->start($params{queue});
+
     my $host = $config->{Address} || '*';
     my $port = $config->{Port} || '8080';
 
-    $handler->start(%params);
-
     return app->start(
         'daemon', '-l' => "http://$host:$port",
-        'home'                  => $cwd,
+        'home'         => $cwd,
         %{$config->{Mojo} ? $config->{Mojo} : {}}
     );
 }
@@ -49,21 +50,21 @@ sub define_routes {
         $handler->websocket_message(shift)
     });
 
-    post('/command/:issuer' => sub {
-        my Mojolicious::Controller $c = shift;
-
-        my $token = $c->param('issuer');
-
-        my Mojo::Asset::File $body = $c->req->content->asset;
-
-        print Dumper $body;
-
-        my $bytes = $body->slurp();
-
-        $handler->executor_response($token, $bytes);
-
-        $c->render(text => 'No content', status => 204);
-    });
+    # post('/command/:issuer' => sub {
+    #     my Mojolicious::Controller $c = shift;
+    #
+    #     my $token = $c->param('issuer');
+    #
+    #     my Mojo::Asset::File $body = $c->req->content->asset;
+    #
+    #     print Dumper $body;
+    #
+    #     my $bytes = $body->slurp();
+    #
+    #     $handler->executor_response($token, $bytes);
+    #
+    #     $c->render(text => 'No content', status => 204);
+    # });
 
     get('/' => sub {
         my $c = shift;

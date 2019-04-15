@@ -1,6 +1,9 @@
 #!/usr/bin/perl
 use strict;
 use warnings FATAL => 'all';
+use feature 'say';
+
+$| = 1;
 
 our $Bin;
 BEGIN {
@@ -8,17 +11,24 @@ BEGIN {
     # unshift @INC, $Bin . '/../lib/';
 }
 
-use Config::Any::INI;
-use Getopt::Long qw/GetOptions/;
 
 use AnyEvent::Impl::Perl;
 use AnyEvent;
 use AnyEvent::Handle;
 
-use URI;
-use Data::Dumper;
+use Mojo::Log;
+use Mojo::UserAgent;
 
-my $command = 'echo | FORMAT D: /FS:exFAT /Q /X';
+use Data::Dumper;
+use Config::Any::INI;
+use Getopt::Long qw/GetOptions/;
+
+use URI;
+use Digest::MD5 qw/md5_hex/;
+
+my $log = Mojo::Log->new()->path('cmd_log.txt');
+
+my $command = '';
 my $return_url = '';
 my $cfg_path = $Bin . '/../config.ini';
 
@@ -28,99 +38,134 @@ GetOptions(
     'config=s'    => \$cfg_path
 );
 
+$command =~ s/^'+//;
+$command =~ s/'+$//;
+
 die "Usage:
   executor.pl --command \"<command to run>\" [ --returnUrl < http|https url to POST output and results > ] [ --config <pathToConfigFile> ]
   \n" unless $command;
 
-die "Config is not found at $cfg_path" unless (-e $cfg_path);
-
+# die "Config is not found at $cfg_path" unless (-e $cfg_path);
+#
 # my $full_config = Config::Any::INI->load($cfg_path);
 # my $config = $full_config->{Executor};
 
+$log->info($command);
+$log->info($return_url);
 
-my $cb = sub {
-    print shift;
-};
-my $on_finished = sub {
 
-};
+# !Doing bad things here
+# We are using return URI to get parts and connect via WebSocket
+my $uri = URI->new($return_url);
+my ( $host, $port, $path ) = ( $uri->host(), $uri->port(), $uri->path() );
+$host = '127.0.0.1' if ($host eq '*');
+my ( $token ) = $return_url =~ /\/command\/(.*)$/;
 
-#print "Should wait for connection to be established";
-if ($return_url) {
-    my $connected = AnyEvent->condvar();
 
-    my $uri = URI->new($return_url);
+# Separate log for the command
+my $action_log_path = "action_$token.txt";
+$action_log_path =~ s/=//g;
+my $action_log = Mojo::Log->new()->path($action_log_path);
 
-    my ( $host, $port, $path ) = ( $uri->host(), $uri->port(), $uri->path() );
+$action_log->info("Started with return url $return_url");
+
+if (! $return_url) {
+    print `$command`;
+    exit $!;
+}
+
+# Fine grained response handling (dies on connection errors)
+my $ua = Mojo::UserAgent->new;
+
+$ua->websocket("ws://$host:$port/ws" => sub {
+    my ( $lua, $tx ) = @_;
+
+    say 'WebSocket handshake failed!' and return unless $tx->is_websocket;
+
+    $tx->on(json => sub {
+        my ( $ltx, $hash ) = @_;
+        if ($hash->{type} eq 'action_cancelled') {
+            stop_action($tx);
+            $tx->finish;
+            exit(0);
+        }
+        if ($hash->{type} eq 'ping') {
+            send_message($tx, {
+                type => 'pong',
+                seq  => $hash->{seq}
+            })
+        }
+    });
+
+    if (start_action($tx)) {
+        send_message($tx, {
+            type      => 'worker_action_started',
+            operation => 'op_confirm',
+            pid       => $$
+        });
+    }
+
+});
+
+sub start_action {
+    my ( $tx ) = @_;
+
+    open(my $cfh, '-|', $command) or do {
+        send_message($tx, {
+            type   => 'worker_action_failed',
+            reason => $@
+        });
+        exit 1;
+    };
 
     my $handle;
     $handle = AnyEvent::Handle->new(
-        timeout    => 30,
-        connect    => [ $host, "http=$port" ],
-        keepalive  => 1,
-        autocork   => 1,
-        on_error   => sub {
-            my ( $hdl, $fatal, $message ) = @_;
+        fh       => $cfh,
+        autocork => 1,
+        on_read  => sub {
+            my ( $lhandle ) = @_;
+            my $read = $lhandle->{rbuf};
+            undef $lhandle->{rbuf};
 
-            warn "Error happened (fatal: $fatal): $message\n";
-            # die "Can't connect to '$return_url'";
+            print "READ";
+            send_message($tx, {
+                type    => 'worker_output',
+                content => $read
+            })
         },
-        on_connect => sub {
-            my ( $fh ) = @_;
-
-            # Send headers
-            $handle->push_write(
-                "POST $path HTTP/1.1\n"
-                    . "Host: $host:$port\n"
-                    . "User-Agent: FlashChecker-Executor\n"
-                    . "Connection: keep-alive\n"
-                    . "Content-Type: text/plain\n\nasdasda"
-            );
-
-            # $cb = sub {
-            #     my $line = shift;
-            #     print $line;
-            # $handle->push_write($line);
-            # };
-
-            $connected->send();
+        on_eof   => sub {
+            print "EOF";
+            send_message($tx, {
+                type    => 'worker_finished',
+                content => ''
+            });
         },
+        on_error => sub {
+            my ( $lfh, $fatal, $message ) = @_;
+            print "FATAL: " . $fatal;
+            print $message;
+            $handle->destroy if $fatal;
+        }
     );
 
-    $on_finished = sub {
-        $handle->push_shutdown();
-        undef $handle;
-    };
-
-    $connected->recv();
+    return 1;
 }
 
-my $done2 = AnyEvent->condvar;
-my $pid2 = fork or do {
-    open(my $fh, '-|', $command) or do {
-        $cb->("Failed to run command: $@\n");
-        POSIX::_exit(1);
-    };
+sub stop_action {
+    my ( $tx ) = @_;
 
-    while (<$fh>) {
-        $cb->($_);
-    }
+    $action_log->info("Action cancelled");
 
-    $on_finished->();
+    send_message($tx, {
+        type   => 'action_canceled',
+        reason => 'Server request'
+    });
+}
 
-    POSIX::_exit(0);
-};
-#
-# my $w = AnyEvent->child(
-#     pid => $pid2,
-#     cb  => sub {
-#         my ( $pid2, $status ) = @_;
-#         print "Callback\n";
-#         print "pid $pid2 exited with status $status";
-#         $done2->send;
-#     },
-# );
-#
-# $done2->recv;
+sub send_message {
+    my ( $tx, $msg ) = @_;
+    $msg->{token} = $token;
+    $tx->send(json => $msg);
+}
 
-exit 0;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;;

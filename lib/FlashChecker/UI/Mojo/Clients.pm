@@ -19,7 +19,13 @@ my $msg_num = 1;
 
 sub new {
     my ( $class, %params ) = @_;
-    my $self = { clients => {} };
+    my $self = {
+        %params,
+        clients => {}
+    };
+
+    $self->{ping_period} = $params{config}->{Websocket}->{PingPeriod} || 30;
+
     bless $self, $class;
     return $self;
 }
