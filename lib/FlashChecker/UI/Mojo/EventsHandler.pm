@@ -20,7 +20,7 @@ sub new {
     my $self = {
         clients  => FlashChecker::UI::Mojo::Clients->new(config => $config),
         workers  => FlashChecker::UI::Mojo::Workers->new(config => $config),
-        listener => USB::Listener->new(),
+        listener => USB::Listener->new(config => $config),
         config   => $config
     };
     bless $self, $class;
@@ -109,12 +109,19 @@ sub _on_command_message {
         my $response = $self->_on_operation_request($msg->{action}, $msg->{device_id});
         $self->clients->send_message($cl_id, $response);
     }
-    elsif ($msg->{type} =~ /^worker_/) {
-        $self->workers->worker_message($msg);
-
-        if (my $info = $self->workers->has_info($msg->{token})) {
-            $self->clients->send_message($cl_id, $info);
-        }
+    # elsif ($msg->{type} =~ /^worker_/) {
+    #     eval {
+    #         $self->workers->worker_message($msg);
+    #
+    #         if (my $info = $self->workers->has_info($msg->{token})) {
+    #             $self->clients->send_message($cl_id, $info);
+    #         }
+    #     } or do {
+    #         $log->error("Failed to process the worker message: " . Dumper($msg));
+    #     }
+    # }
+    else {
+        $log->warn("Unregistered message type: $msg->{type}");
     }
 };
 

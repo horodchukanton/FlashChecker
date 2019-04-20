@@ -20,8 +20,9 @@ my threads $listener;
 
 sub new {
     my ( $class, %params ) = @_;
+
     my $self = {
-        system => USB::Devices->new(),
+        system => USB::Devices->new(mock => $params{config}{USB}{Mock}),
         %params
     };
     bless $self, $class;

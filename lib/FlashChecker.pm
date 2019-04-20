@@ -12,7 +12,7 @@ sub new {
     my $self = { config => $config };
     bless $self, $class;
 
-    $self->{listener} = USB::Listener->new(debug => 1);
+    $self->{listener} = USB::Listener->new(debug => 1, config => $config);
 
     my $ui_type = $self->{config}->{UI}->{Type};
     $self->{ui} = FlashChecker::UI->new(

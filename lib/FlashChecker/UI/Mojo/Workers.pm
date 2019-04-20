@@ -92,12 +92,19 @@ sub worker_message {
     if ($message->{type} eq 'worker_action_started') {
         $log->info("Worker said that he started an operation");
     }
+    else {
+        print "Worker message:" . Dumper $message;
+    }
 
 }
 
 sub has_info {
-    my ( $token ) = @_;
-    return qq/ { "type":"info","message":"Hi,there","token":"$token" } /;
+    my ( $self, $token ) = @_;
+    return {
+        "type"    => "info",
+        "message" => "Hi,there",
+        "token"   => $token
+    };
 }
 
 sub build_return_url {

@@ -2,14 +2,17 @@ package USB::Devices;
 use strict;
 use warnings FATAL => 'all';
 
+use Data::Dumper;
+
 my $WIN_ATTRS = 'filesystem,size,volumeserialnumber,deviceid,filesystem,description';
 use USB::_Execute qw/execute/;
 
 sub new {
-    my ($class, %params) = @_;
+    my ( $class, %params ) = @_;
     my $self = { %params };
     bless $self, $class;
 
+    $self->{mock} ||= $params{mock} || 0;
     $self->{os} ||= ( $^O =~ 'MSWin32' ) ? 'win' : 'lin';
 
     return $self;
@@ -17,6 +20,22 @@ sub new {
 
 sub get_list_of_devices {
     my ( $self ) = @_;
+
+    if ($self->{mock}) {
+        my @LETTERS = ( split('', qw/ABJKLMNOPQRSTKLMNOPQRST/) );
+        my @list = ();
+
+        push(@list, {
+            "Size"               => "31017926656",
+            "FileSystem"         => "exFAT",
+            "id"                 => "$LETTERS[$_]:",
+            "Description"        => "Mocked",
+            "VolumeSerialNumber" => "BE82831D",
+            "DeviceID"           => "$LETTERS[$_]:",
+        }) for (1 .. $self->{mock});
+
+        return \@list;
+    }
 
     my $list = ( $self->{os} eq 'win' )
         ? get_devices_win()
@@ -104,7 +123,7 @@ sub _parse_win_keypairs {
     }
 
     # Description can contain UTF-8 characters
-    for (@result){
+    for (@result) {
         $_->{Description} = Encode::decode_utf8($_->{Description})
             if ($_->{Description});
     }
