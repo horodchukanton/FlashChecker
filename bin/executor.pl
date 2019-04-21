@@ -15,25 +15,24 @@ BEGIN {
     use FindBin '$Bin';
     # unshift @INC, $Bin . '/../lib/';
 }
-use POSIX ":sys_wait_h";
-use AnyEvent::Impl::Perl;
-use AnyEvent;
-use AnyEvent::Handle;
-use AE;
-
-use Mojo::Log;
-use Mojo::UserAgent;
-
-use File::Spec;
-
 use Data::Dumper;
+
+use POSIX ":sys_wait_h";
+use EV;
+use AnyEvent;
+
+use AnyEvent::Log;
+use AnyEvent::WebSocket::Client;
+use Cpanel::JSON::XS;
+
 use Config::Any::INI;
 use Getopt::Long qw/GetOptions/;
 
 use URI;
+use File::Spec;
 use Digest::MD5 qw/md5_hex/;
 
-my $log = Mojo::Log->new()->path('cmd_log.txt');
+my $log = AnyEvent::Log::logger info => \my $info;
 
 my $command = '';
 my $return_url = '';
@@ -57,8 +56,8 @@ die "Usage:
 # my $full_config = Config::Any::INI->load($cfg_path);
 # my $config = $full_config->{Executor};
 
-$log->info("command : " . $command);
-$log->info("return_url : " . $return_url);
+$log->("command : " . $command);
+$log->("return_url : " . $return_url);
 
 # !Doing bad things here
 # We are using return URI to get parts and connect via WebSocket
@@ -72,9 +71,9 @@ my ( $token ) = $return_url =~ /\/command\/(.*)$/;
 my $token_safe_name = $token;
 $token_safe_name =~ s/=//g;
 
-my $action_log = Mojo::Log->new()->path("action_$token_safe_name.txt");
-
-$action_log->info("Started with return url $return_url");
+# my $action_log = AnyEvent->logger("action_$token_safe_name.txt");
+my $action_log = AnyEvent::Log::logger info => \my $action;
+$action_log->("Started with return url $return_url");
 
 if (! $return_url) {
     print `$command`;
@@ -82,22 +81,33 @@ if (! $return_url) {
 }
 
 # Fine grained response handling (dies on connection errors)
-my $ua = Mojo::UserAgent->new;
+my $ua = AnyEvent::WebSocket::Client->new;
 
 my $handle;
 my $timer;
 my $seek_timer;
 
-$ua->websocket("ws://$host:$port/ws" => sub {
-    my ( $lua, $tx ) = @_;
+$ua->connect("ws://$host:$port/ws")->cb(sub {
 
-    say 'WebSocket handshake failed!' and return unless $tx->is_websocket;
+    our $tx = eval {shift->recv};
+    if ($@) {
+        # handle error...
+        warn $@;
+        return;
+    }
 
-    $tx->on(json => sub {
-        my ( $ltx, $hash ) = @_;
+    # recieve message from the websocket...
+    $tx->on(each_message => sub {
+        # $connection is the same connection object
+        # $message isa AnyEvent::WebSocket::Message
+        my ( $connection, $message ) = @_;
+
+        my $hash = decode_json($message->decoded_body());
+        say "received:" . $message->body();
+
         if ($hash->{type} eq 'action_cancelled') {
             stop_action($tx);
-            $tx->finish;
+            $tx->close();
             exit(0);
         }
         if ($hash->{type} eq 'ping') {
@@ -106,17 +116,22 @@ $ua->websocket("ws://$host:$port/ws" => sub {
                 seq  => $hash->{seq}
             })
         }
+        else {
+            say "Unregistered message " . Dumper $hash;
+        }
+
     });
 
+    say "Starting action";
     my ( $child_pid, $cfh ) = start_action($tx);
     if ($child_pid && $cfh) {
+        say "Child pid is received";
         send_message($tx, {
             type      => 'worker_action_started',
             pid       => $$,
             child_pid => $child_pid
         });
 
-        my $cv = AE::cv();
         $timer = wait_for_child($child_pid,
             sub {
                 my $current_code = shift;
@@ -126,15 +141,6 @@ $ua->websocket("ws://$host:$port/ws" => sub {
                     code      => $current_code
                 });
 
-                # $handle->push_read(line => sub {
-                #     my ( $hdl, $line ) = @_;
-                #     # print "Got line: '$line'\n";
-                #
-                #     send_message($tx, {
-                #         type    => 'worker_output',
-                #         content => $line
-                #     });
-                # });
             },
             sub {
                 send_message($tx, {
@@ -142,16 +148,12 @@ $ua->websocket("ws://$host:$port/ws" => sub {
                     child_pid => $child_pid
                 });
 
+                print STDERR "FINISHED:";
                 close($cfh);
-                $cv->send();
-            });
-
-        $cv->recv();
-
-        exit 0;
+            }
+        );
     }
     else {
-
         die "Failed to get pid or run file\n";
     }
 
@@ -162,8 +164,6 @@ sub start_action {
     my ( $tx ) = @_;
 
     my $someTemporaryFile = "./test_$token_safe_name.txt";
-    my $someTemporaryFileabs = File::Spec->rel2abs($someTemporaryFile);
-
     # Create temprorary file so we are not opening it before it is created by a command
 
     open(my $tfh, '>', $someTemporaryFile)
@@ -197,24 +197,21 @@ sub setup_handle {
     my ( $cfh, $tx ) = @_;
 
     my $current_seek_pos = 0;
-
     $seek_timer = AnyEvent->timer(
         after    => 0,
         interval => 1,
         cb       => sub {
             # Return to last position
-            seek($cfh, $current_seek_pos, SEEK_SET);
+            # seek($cfh, $current_seek_pos, SEEK_SET);
 
             my $content = '';
+            my $read_bytes = read($cfh, $content, 1024 * 1024, $current_seek_pos);
 
-            while (my $line = readline($cfh)) {
-                chomp($line);
-                $content .= $line;
-            }
-
-            if ($content) {
+            if ($read_bytes) {
                 # Remembering the pos
-                $current_seek_pos += length($content);
+                $current_seek_pos += $read_bytes;
+
+                $action_log->($content);
 
                 send_message($tx, {
                     type    => 'worker_output',
@@ -227,32 +224,21 @@ sub setup_handle {
         }
     );
 
-    return $handle;
+    return $seek_timer;
 }
 
 sub wait_for_child {
-    my ( $pid, $run_cb, $cb ) = @_;
+    my ( $pid, $run_cb, $finished_cb ) = @_;
 
     $timer = AnyEvent->timer(after => 1, interval => 0, cb => sub {
         my $exit_code = waitpid($pid, WNOHANG);
         if ($exit_code == 0) {
             $run_cb->($exit_code);
-            wait_for_child($pid, $run_cb, $cb);
+            wait_for_child($pid, $run_cb, $finished_cb);
         }
         else {
-            $cb->($exit_code);
+            $finished_cb->($exit_code);
         }
-    });
-}
-
-sub stop_action {
-    my ( $tx ) = @_;
-
-    $action_log->info("Action cancelled");
-
-    send_message($tx, {
-        type   => 'action_canceled',
-        reason => 'Server request'
     });
 }
 
@@ -260,14 +246,16 @@ sub send_message {
     my ( $tx, $msg ) = @_;
     $msg->{token} = $token;
     eval {
-        $tx->send({ json => $msg });
+        my $json = encode_json($msg);
+        $tx->send($json);
+        $action_log->("Message sent: $msg->{type};\n");
+        1;
     } or do {
         die "Failed to send a message: $@\n";
     }
 }
 
-Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
-
+EV::run;
 print "IOLoop crashed\n";
 
 exit 0;
