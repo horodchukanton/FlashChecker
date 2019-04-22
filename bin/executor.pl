@@ -15,18 +15,20 @@ use Data::Dumper;
 use POSIX qw(WNOHANG);
 use Fcntl qw(:seek);
 
-use EV;
-use Mojo::Log;
-use AnyEvent;
-use AnyEvent::WebSocket::Client;
-
 use Cpanel::JSON::XS;
 use Getopt::Long qw/GetOptions/;
 use URI;
 
+use AnyEvent::Impl::Perl;
+use Mojo::Log;
+use AnyEvent;
+use AnyEvent::WebSocket::Client;
+
 # use Config::Any::INI;
 # use File::Spec;
 
+my $CHILD_INTERVAL = 10;
+my $OUTPUT_INTERVAL = 5;
 
 my $command = '';
 my $return_url = '';
@@ -40,8 +42,13 @@ GetOptions(
     'config=s'    => \$cfg_path
 );
 
+$command ||= '';
 $command =~ s/^'+//;
 $command =~ s/'+$//;
+
+# Separate log for the command
+my $token_safe_name = $token;
+$token_safe_name =~ s/=//g;
 
 die "Usage:
   executor.pl --command \"<command to run>\" [ --returnUrl < http|https url to POST output and results > --token <token> ] [ --config <pathToConfigFile> ]
@@ -52,17 +59,6 @@ die "Usage:
 # my $full_config = Config::Any::INI->load($cfg_path);
 # my $config = $full_config->{Executor};
 
-# Saving command log
-my $cmd_log = Mojo::Log->new()->path("cmd_log.txt");
-$cmd_log->info("command : " . $command, "return_url : " . $return_url);
-
-# Separate log for the command
-my $token_safe_name = $token;
-$token_safe_name =~ s/=//g;
-
-unlink "action_$token_safe_name.txt";
-my $action_log = Mojo::Log->new->path("action_$token_safe_name.txt");
-$action_log->info("Started with return url: '$return_url'");
 if (! $return_url) {
     print `$command`;
     exit $!;
@@ -70,23 +66,108 @@ if (! $return_url) {
 
 my $wait_timer;
 my $seek_timer;
-my $ua = AnyEvent::WebSocket::Client->new;
 
-$ua->connect($return_url)->cb(sub {
-    my $tx = eval {shift->recv};
-    if ($@) {
-        warn $@;
-        die $@;
-    }
+my ( $cfh, $pid ) = start_command_in_fork($command);
 
-    # recieve message from the websocket...
+# Saving command log
+{
+    my $cmd_log = Mojo::Log->new()->path("cmd_log.txt");
+    $cmd_log->info("command : " . $command, " return_url : " . $return_url);
+    undef $cmd_log;
+}
+
+unlink "action_$token_safe_name.txt";
+my $action_log = Mojo::Log->new->path("action_$token_safe_name.txt");
+$action_log->info("Started with return url: '$return_url'");
+
+main($return_url, $pid, $cfh);
+
+sub main {
+    my ( $websocket_url, $child_pid, $child_filehandle ) = @_;
+    my $connection = connect_to_websocket($websocket_url);
+    $connection = setup_connection_service_hadlers($connection);
+
+    my $finish_cv = AnyEvent->condvar();
+
+    # Set wait timer
+    $wait_timer = set_wait_for_child_timer($child_pid, $connection, $finish_cv);
+
+    # Set read-and-send timer
+    $seek_timer = setup_read_timer($child_filehandle, $connection);
+
+    # Waiting for child to finish
+    $finish_cv->recv();
+
+    # Send last content
+    undef $seek_timer;
+    undef $wait_timer;
+
+    send_new_content($child_filehandle, $connection);
+
+    close $child_filehandle;
+
+    send_message($connection, {
+        type      => 'worker_child_finished',
+        child_pid => $pid
+    });
+
+    exit 0;
+}
+
+sub start_command_in_fork {
+    my ( $cmd ) = @_;
+
+    my $cmd_temp_file = "./test_$token_safe_name.txt";
+
+    # Create temporary file so we are not opening it before it is created by a command
+    open(my $tfh, '>', $cmd_temp_file)
+        or die "Can't create test file $cmd_temp_file: $@\n";
+    # Cleaning file
+    print $tfh "";
+    close($tfh);
+
+    my $command_pid = system(1, "$cmd > $cmd_temp_file");
+
+    open(my $fh, '<', "$cmd_temp_file")
+        or die "Can't open $cmd_temp_file : $@\n";
+    binmode($fh);
+
+    return( $fh, $command_pid );
+}
+
+sub connect_to_websocket {
+    my ( $websocket_url ) = @_;
+
+    my $ua = AnyEvent::WebSocket::Client->new;
+
+    my $connection_cv = AnyEvent->condvar();
+    $ua->connect($websocket_url)->cb(sub {
+        my $tx = eval {shift->recv};
+        if ($@) {
+            warn $@;
+            $connection_cv->croak();
+            die $@;
+        }
+        $connection_cv->send($tx);
+    });
+
+    return $connection_cv->recv();
+}
+
+sub setup_connection_service_hadlers {
+    my ( $tx ) = @_;
+
     $tx->on(each_message => sub {
         # $connection is the same connection object
         # $message isa AnyEvent::WebSocket::Message
         my ( $connection, $message ) = @_;
 
-        my $hash = decode_json($message->decoded_body());
-        say "received:" . $message->{type};
+        print Dumper $message;
+
+        my $hash = eval {decode_json($message->decoded_body())};
+        if ($@) {
+            die "Failed to parse message from server\n";
+        }
 
         if ($hash->{type} eq 'action_cancelled') {
             $action_log->info("Action was cancelled");
@@ -99,92 +180,53 @@ $ua->connect($return_url)->cb(sub {
             })
         }
         else {
-            $cmd_log->warn("Unregistered message " . Dumper $hash);
+            $action_log->warn("Unregistered message " . Dumper $hash);
         }
-
     });
 
-    my $child_pid = start_action($tx);
-    if ($child_pid) {
-        send_message($tx, {
-            type      => 'worker_action_started',
-            pid       => $$,
-            child_pid => $child_pid
-        });
+    return $tx;
+}
 
-        $wait_timer = wait_for_child($child_pid,
-            sub {
-                my $current_code = shift;
-                send_message($tx, {
-                    type      => 'worker_child_running',
-                    child_pid => $child_pid,
-                    code      => $current_code
-                });
+sub set_wait_for_child_timer {
+    my ( $child_pid, $tx, $exit_cv ) = @_;
 
-            },
-            sub {
-                say "Finished callback";
-                undef $wait_timer;
+    send_message($tx, {
+        type      => 'worker_action_started',
+        pid       => $$,
+        child_pid => $child_pid
+    });
 
-                send_message($tx, {
-                    type      => 'worker_child_finished',
-                    child_pid => $child_pid
-                });
-                send_message($tx, {
-                    type   => 'disconnect',
-                    reason => 'ok'
-                });
+    $wait_timer = wait_for_child($child_pid,
+        sub {
+            my $current_code = shift;
+            send_message($tx, {
+                type      => 'worker_child_running',
+                child_pid => $child_pid,
+                code      => $current_code
+            });
+        },
+        sub {
+            $exit_cv->send();
+        }
+    );
+}
 
-                # Give some time for message to be sent;
-                die;
-            }
-        );
-    }
-    else {
-        $action_log->debug("Child is free!!!");
-        die "Child has to die!";
-    }
-});
+sub setup_read_timer {
+    my ( $child_filehandle, $tx ) = @_;
 
-sub start_action {
-    my ( $tx ) = @_;
+    my $timer = AnyEvent->timer(
+        after    => 0,
+        interval => $OUTPUT_INTERVAL,
+        cb       => sub {send_new_content($child_filehandle, $tx)}
+    );
 
-    my $cmd_temp_file = "./test_$token_safe_name.txt";
-
-    # Create temporary file so we are not opening it before it is created by a command
-    open(my $tfh, '>', $cmd_temp_file)
-        or die "Can't create test file $cmd_temp_file: $@\n";
-    # Cleaning file
-    print $tfh "";
-    close($tfh);
-
-    my $pid = fork();
-    if (! defined($pid)) {
-        die "Fork failed\n";
-    }
-
-    # Running a child
-    if ($pid == 0) {
-        my $wait_cmd = ( $^O eq 'MSWin32' )
-            ? 'timeout /T 5 > NUL'
-            : 'sleep 1 > /dev/null';
-
-        exit system("$command > $cmd_temp_file && $wait_cmd");
-    }
-
-    open(my $cfh, '<', "$cmd_temp_file")
-        or die "Can't open $cmd_temp_file : $@\n";
-    binmode($cfh);
-
-    $seek_timer = setup_handle($cfh, $tx);
-
-    return $pid;
+    return $timer;
 }
 
 sub send_new_content {
-    my ( $cfh, $tx ) = @_;
+    my ( $child_filehandle, $tx ) = @_;
     my $content = '';
-    my $read_bytes = read($cfh, $content, 1024 * 1024);
+    my $read_bytes = read($child_filehandle, $content, 1024 * 1024);
 
     if (! defined $read_bytes) {
         warn "Read error\n";
@@ -199,31 +241,18 @@ sub send_new_content {
     }
     else {
         # Clear EOF
-        seek($cfh, 0, SEEK_CUR);
+        seek($child_filehandle, 0, SEEK_CUR);
     }
-}
-
-sub setup_handle {
-    my ( $cfh, $tx ) = @_;
-
-    my $timer = AnyEvent->timer(
-        after    => 0,
-        interval => 0.5,
-        cb       => sub {send_new_content($cfh, $tx)}
-    );
-
-    return $timer;
+    return $read_bytes;
 }
 
 sub wait_for_child {
-    my ( $pid, $run_cb, $finished_cb ) = @_;
+    my ( $c_pid, $run_cb, $finished_cb ) = @_;
 
-    $wait_timer = AnyEvent->timer(after => 0, interval => 1, cb => sub {
-        my $exit_code = waitpid($pid, WNOHANG);
+    $wait_timer = AnyEvent->timer(after => 0, interval => $CHILD_INTERVAL, cb => sub {
+        my $exit_code = waitpid($c_pid, WNOHANG);
         if ($exit_code == 0) {
-            undef $wait_timer;
             $run_cb->($exit_code);
-            # wait_for_child($pid, $run_cb, $finished_cb);
         }
         elsif ($exit_code == - 1) {
             $action_log->debug("Child was reaped");
@@ -242,6 +271,7 @@ sub wait_for_child {
 
 sub send_message {
     my ( $tx, $msg ) = @_;
+
     $msg->{token} = $token;
     eval {
         my $json = encode_json($msg);
@@ -252,29 +282,3 @@ sub send_message {
         die "Failed to send a message: $@\n";
     }
 }
-
-sub me_was_fucked_up {
-    # Trying to connect and tell it to the main process
-
-    my $emergency_ua = $ua || AnyEvent::WebSocket::Client->new;
-    $emergency_ua->connect($return_url)->cb(sub {
-        my $tx = eval {shift->recv};
-        if ($@) {
-            warn $@;
-            return;
-        }
-
-        $tx->send(qq/{ "type" : "worker_me_crashed", "token" : "$token" }/);
-
-        exit 0;
-    });
-}
-
-$SIG{SEGV} = sub {
-    print "SEGV\n";
-    me_was_fucked_up();
-    EV::loop;
-
-};
-
-EV::loop;
