@@ -6,6 +6,7 @@ use Data::Dumper;
 use Carp;
 
 use Mojo::IOLoop;
+use Mojo::EventEmitter;
 use Mojo::Log;
 
 use USB::Listener;
@@ -13,13 +14,20 @@ use FlashChecker::UI::Mojo::Clients;
 use FlashChecker::UI::Mojo::Workers;
 
 my $log = Mojo::Log->new;
+my $event_emitter = Mojo::EventEmitter->new();
 
 sub new {
     my ( $class, $config ) = @_;
 
     my $self = {
-        clients  => FlashChecker::UI::Mojo::Clients->new(config => $config),
-        workers  => FlashChecker::UI::Mojo::Workers->new(config => $config),
+        clients  => FlashChecker::UI::Mojo::Clients->new(
+            config => $config,
+            events => $event_emitter
+        ),
+        workers  => FlashChecker::UI::Mojo::Workers->new(
+            config => $config,
+            events => $event_emitter
+        ),
         listener => USB::Listener->new(config => $config),
         config   => $config
     };
@@ -35,6 +43,7 @@ sub start {
     $self->{period} = $config->{USB}->{Poll} || 3;
     $self->{actions} = $config->{Actions};
 
+    $self->init_events();
     $self->check_queue($queue);
     $self->clients->_continious_ping();
 }
@@ -53,6 +62,20 @@ sub workers {
 sub listener {
     my ( $self ) = @_;
     return $self->{listener};
+}
+
+sub init_events {
+    my ( $self ) = @_;
+    $event_emitter->on(
+        'worker_event' => sub {
+            my ( $emitter, $token, $cl_id, $event ) = @_;
+            $self->clients->send_message($cl_id, {
+                type  => 'worker_event',
+                token => $token,
+                event => $event
+            });
+        }
+    );
 }
 
 sub websocket_message {
@@ -106,27 +129,33 @@ sub _on_command_message {
         });
     }
     elsif ('action_request' eq $msg->{type}) {
-        my $response = $self->_on_operation_request($msg->{action}, $msg->{device_id});
+        my $response = $self->_on_operation_request($cl_id, $msg->{action}, $msg->{device_id});
         $self->clients->send_message($cl_id, $response);
     }
-    # elsif ($msg->{type} =~ /^worker_/) {
-    #     eval {
-    #         $self->workers->worker_message($msg);
-    #
-    #         if (my $info = $self->workers->has_info($msg->{token})) {
-    #             $self->clients->send_message($cl_id, $info);
-    #         }
-    #     } or do {
-    #         $log->error("Failed to process the worker message: " . Dumper($msg));
-    #     }
-    # }
+    elsif ('action_info_request' eq $msg->{type}) {
+        my ( $token, $offset ) = ( $msg->{token}, $msg->{offset} );
+        if (my $info = $self->workers->has_info($token, $offset || 0)) {
+            $self->clients->send_message($cl_id, $info);
+        }
+    }
+    elsif ('action_cancel_request' eq $msg->{type}) {
+        my $token = $msg->{token};
+        $self->workers->cancel_operation($token);
+    }
+    elsif ($msg->{type} =~ /^worker_/) {
+        eval {
+            $self->workers->worker_message($msg);
+        } or do {
+            $log->error("Failed to process the worker message: $@");
+        }
+    }
     else {
         $log->warn("Unregistered message type: $msg->{type}");
     }
 };
 
 sub _on_operation_request {
-    my ( $self, $action, $device_id ) = @_;
+    my ( $self, $client_id, $action, $device_id ) = @_;
 
     unless ($device_id) {
         $log->warn("No device id to return info");
@@ -151,6 +180,7 @@ sub _on_operation_request {
         device           => $device,
         device_id        => $device_id,
         command_template => $self->{actions}->{$action},
+        client_id        => $client_id,
         params           => {
             DeviceID => $device_id
         }

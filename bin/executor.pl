@@ -162,8 +162,6 @@ sub setup_connection_service_hadlers {
         # $message isa AnyEvent::WebSocket::Message
         my ( $connection, $message ) = @_;
 
-        print Dumper $message;
-
         my $hash = eval {decode_json($message->decoded_body())};
         if ($@) {
             die "Failed to parse message from server\n";

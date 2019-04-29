@@ -30,6 +30,9 @@ sub new {
     return $self;
 }
 
+#@returns Mojo::EventEmitter
+sub events {return shift->{events}}
+
 sub on_message {
     my ( $self, $cl_id, $mojo_, $hash ) = @_;
 
@@ -148,6 +151,10 @@ sub disconnected {
 sub send_message {
     my ( $self, $cl_id, $msg, $confirm_sub ) = @_;
     return unless $cl_id;
+
+    if ($cl_id eq 'ALL') {
+        $self->notify_all($msg, $confirm_sub);
+    }
 
     $msg->{seq} = $msg_num ++;
     $delivery_confirm{$msg->{seq}} = {

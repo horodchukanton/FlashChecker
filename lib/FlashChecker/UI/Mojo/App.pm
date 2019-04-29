@@ -3,14 +3,12 @@ use strict;
 use warnings FATAL => 'all';
 
 use Mojolicious::Lite;
-# plugin AutoReload => {};
+plugin AutoReload => {};
 
 use Cwd qw(abs_path);
 use File::Basename qw(dirname);
-
 use Mojo::IOLoop;
 use Data::Dumper;
-
 use FlashChecker::UI::Mojo::EventsHandler;
 
 my $handler = undef;

@@ -2,29 +2,35 @@
 var ws = null;
 var devicesList = null;
 var usbTemplate = null;
-var operations = null
+var operations = null;
 
 function processMessage(message) {
     var debugStr = $('<p>').text(JSON.stringify(message));
     $('div#debug').append(debugStr);
 
-    switch (message['type']) {
-        case 'connected':
-            devicesList.add(DevicesList.prototype.createUsbDevice(message['device']));
-            break;
-        case 'removed':
-            devicesList.remove(message['id']);
-            break;
-        case 'restarted':
-            ws.send({type: 'request_list'});
-            break;
-        case 'list':
-            devicesList.renew(message['devices']);
-            break;
-        default:
-            console.log("I'm not very smart indeed :)" + JSON.stringify(message))
+    var messageType = message['type'];
+
+    // Determining special actions
+    if (operations.isResponsibleFor(messageType)) {
+         operations.onMessage(message)
+    }
+    else if (devicesList.isResponsibleFor(messageType)) {
+         devicesList.onMessage(message)
+    }
+    else {
+        switch (messageType) {
+            case 'restarted':
+                ws.send({type: 'request_list'});
+                break;
+            case 'error':
+                alert(message['message'] || 'undefined error');
+                break;
+            default:
+                console.log("I'm not very smart indeed :)" + JSON.stringify(message))
+        }
     }
 
+    // Then renew the UI
     var $devicesHtml = $('div#flash-container');
     $devicesHtml.html(devicesList.toHtml());
     $devicesHtml.find('button.btn-action').on('click', function () {
@@ -38,10 +44,21 @@ function processMessage(message) {
     });
 }
 
-function Operations() {
-}
-
+function Operations() {}
 Operations.prototype = {
+    _message_types: ['action_accepted'],
+    isResponsibleFor: function (messageType) {
+        return this._message_types.indexOf(messageType) >= 0
+    },
+    onMessage: function (message) {
+        switch (message['type']) {
+            case 'action_accepted':
+                alert("Action accepted!");
+                break;
+            default:
+                console.log("Operations received wrong message:", message)
+        }
+    },
     invokeAction: function (action, deviceId) {
         if (!action && deviceId) {
             alert("No action or deviceID")
@@ -51,7 +68,7 @@ Operations.prototype = {
             action: action,
             device_id: deviceId
         })
-    }
+    },
 };
 
 function DevicesList() {
@@ -59,6 +76,25 @@ function DevicesList() {
 }
 
 DevicesList.prototype = {
+    _message_types: ['connected', 'removed', 'list'],
+    isResponsibleFor: function (messageType) {
+        return this._message_types.indexOf(messageType) >= 0
+    },
+    onMessage: function (message) {
+        switch (message['type']) {
+            case 'connected':
+                this.add(this.createUsbDevice(message['device']));
+                break;
+            case 'removed':
+                this.remove(message['id']);
+                break;
+            case 'list':
+                this.renew(message['devices']);
+                break;
+            default:
+                console.log("DevicesList received wrong message:", message)
+        }
+    },
     createUsbDevice: function (devInfo) {
         var id = devInfo['DeviceID'];
         return new USBDevice(id, devInfo);
