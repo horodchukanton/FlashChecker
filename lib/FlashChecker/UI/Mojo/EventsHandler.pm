@@ -130,6 +130,7 @@ sub _on_command_message {
     }
     elsif ('action_request' eq $msg->{type}) {
         my $response = $self->_on_operation_request($cl_id, $msg->{action}, $msg->{device_id});
+        $response->{request_num} = $msg->{request_num};
         $self->clients->send_message($cl_id, $response);
     }
     elsif ('action_info_request' eq $msg->{type}) {

@@ -3,7 +3,7 @@
 
 <script>
 var OPTIONS = {
-    websocket_url : '<%= url_for('ws')->to_abs() =%>',
+    websocket_url : '<%= url_for('ws')->to_abs() =%>'
 }
 </script>
 
@@ -63,4 +63,3 @@ var OPTIONS = {
 </script>
 
 <script src="/js/flash_checker.js"></script>
-

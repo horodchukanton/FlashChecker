@@ -12,12 +12,11 @@ function processMessage(message) {
 
     // Determining special actions
     if (operations.isResponsibleFor(messageType)) {
-         operations.onMessage(message)
-    }
-    else if (devicesList.isResponsibleFor(messageType)) {
-         devicesList.onMessage(message)
-    }
-    else {
+        operations.onMessage(message)
+    } else if (devicesList.isResponsibleFor(messageType)) {
+        devicesList.onMessage(message);
+        Events.emit('devices_renewed');
+    } else {
         switch (messageType) {
             case 'restarted':
                 ws.send({type: 'request_list'});
@@ -29,50 +28,91 @@ function processMessage(message) {
                 console.log("I'm not very smart indeed :)" + JSON.stringify(message))
         }
     }
-
-    // Then renew the UI
-    var $devicesHtml = $('div#flash-container');
-    $devicesHtml.html(devicesList.toHtml());
-    $devicesHtml.find('button.btn-action').on('click', function () {
-        var $this = $(this);
-        var deviceId = $this.attr('data-deviceId');
-        var action = $this.attr('data-action');
-
-        console.log("Clicked: %s, %s", deviceId, action);
-
-        operations.invokeAction(action, deviceId);
-    });
 }
 
-function Operations() {}
+function onActionButtonClicked() {
+    var $this = $(this);
+    var deviceId = $this.attr('data-deviceId');
+    var action = $this.attr('data-action');
+    console.log("Clicked: %s, %s", deviceId, action);
+    operations.invokeAction(action, deviceId, $this);
+}
+
+function Operations() {
+    this.sequence = 0;
+    this.pending = [];
+    this.running = {};
+}
+
 Operations.prototype = {
-    _message_types: ['action_accepted'],
+    _message_types: [
+        'action_accepted',
+        'worker_action_started',
+        'worker_event'
+    ],
     isResponsibleFor: function (messageType) {
         return this._message_types.indexOf(messageType) >= 0
     },
     onMessage: function (message) {
+        var token = message['token'];
+        var operation;
+
         switch (message['type']) {
             case 'action_accepted':
-                alert("Action accepted!");
+                var sequence = message['request_num'];
+                operation = this.pending.filter(function (value) {
+                    return value['request_num'] === sequence
+                })[0];
+                operation['state'] = 'started';
+                this.running[token] = operation;
+                break;
+            case 'worker_action_started':
+                // Find the operation
+                operation = this.running[token];
+                operation['state'] = 'running';
+                // Run the progress bar
+                break;
+            case 'worker_event':
+                operation = this.running[token];
+                if (message['event']['type'] === 'worker_child_finished') {
+                    operation.state = 'finished';
+                }
                 break;
             default:
-                console.log("Operations received wrong message:", message)
+                console.log("Operations received wrong message:", message);
         }
+        Events.emit(message['type'], operation);
     },
-    invokeAction: function (action, deviceId) {
+    invokeAction: function (action, deviceId, $button) {
         if (!action && deviceId) {
-            alert("No action or deviceID")
+            alert("Oops. No action or deviceID. Renew the page.")
         }
-        ws.send({
-            type: 'action_request',
+        var requestNumber = ++this.sequence;
+        var newOperation = {
             action: action,
-            device_id: deviceId
-        })
-    },
+            device_id: deviceId,
+            request_num: requestNumber,
+            type: 'action_request'
+        };
+
+        // HARM: result can return before we save the reference
+        ws.send(newOperation);
+
+        // Add it to temporary
+        newOperation['button'] = $button;
+        newOperation['state'] = 'pending';
+        this.pending.push(newOperation);
+    }
 };
 
-function DevicesList() {
+function DevicesList($html) {
     this.devices = {};
+    this.$html = $html;
+
+    var self = this;
+    Events.on('devices_renewed', function () {
+        self.renewHtml()
+    });
 }
 
 DevicesList.prototype = {
@@ -111,20 +151,25 @@ DevicesList.prototype = {
             self.add(self.createUsbDevice(devInfo));
         });
     },
+    renewHtml: function () {
+        this.$html.html(this.toHtml());
+        this.$html.find('button.btn-action').on('click', onActionButtonClicked);
+    },
     toHtml: function () {
         var deviceIds = Object.keys(this.devices);
 
-        var flash_views;
+        var $div_list = $('<div></div>', {'id': 'flash-list'});
+
         if (deviceIds.length > 0) {
-            var self = this;
-            flash_views = deviceIds.map(function (id) {
-                return self.devices[id].toHtml()
-            });
+            for (var i = 0; i < deviceIds.length; i++) {
+                var id = deviceIds[i];
+                $div_list.append(this.devices[id].toHtml())
+            }
         } else {
-            flash_views = ['No devices connected']
+            $div_list.append('No devices');
         }
 
-        return '<div id="flash-list" class="">' + flash_views.join('') + '</div>';
+        return $div_list;
     }
 };
 
@@ -157,7 +202,7 @@ USBDevice.prototype = {
         return this.info['Description'];
     },
     toHtml: function () {
-        return Mustache.render(usbTemplate, {
+        var rendered = Mustache.render(usbTemplate, {
             id: this.getId(),
             root: this.getRootName(),
             name: this.getDescription(),
@@ -165,6 +210,10 @@ USBDevice.prototype = {
             size: this.getSizeGb(),
             actions: this.getActions()
         });
+
+        this.$html = $(rendered);
+
+        return this.$html;
     }
 };
 
@@ -174,8 +223,8 @@ $(function () {
     });
 
     Events.once('WebSocket.connected', function () {
-        devicesList = new DevicesList();
-        operations = new Operations();
+        devicesList = new DevicesList($('div#flash-container'));
+        operations = new Operations($('div#operations-container'));
 
         Events.on('message', processMessage);
         ws.send({type: 'request_list'});
