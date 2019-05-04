@@ -59,7 +59,7 @@ die "Usage:
 # my $full_config = Config::Any::INI->load($cfg_path);
 # my $config = $full_config->{Executor};
 
-if (! $return_url) {
+if (!$return_url) {
     print `$command`;
     exit $!;
 }
@@ -67,7 +67,7 @@ if (! $return_url) {
 my $wait_timer;
 my $seek_timer;
 
-my ( $cfh, $pid ) = start_command_in_fork($command);
+my ($cfh, $pid) = start_command_in_fork($command);
 
 # Saving command log
 {
@@ -83,7 +83,7 @@ $action_log->info("Started with return url: '$return_url'");
 main($return_url, $pid, $cfh);
 
 sub main {
-    my ( $websocket_url, $child_pid, $child_filehandle ) = @_;
+    my ($websocket_url, $child_pid, $child_filehandle) = @_;
     my $connection = connect_to_websocket($websocket_url);
     $connection = setup_connection_service_hadlers($connection);
 
@@ -96,7 +96,7 @@ sub main {
     $seek_timer = setup_read_timer($child_filehandle, $connection);
 
     # Waiting for child to finish
-    $finish_cv->recv();
+    my $exit_code = $finish_cv->recv();
 
     # Send last content
     undef $seek_timer;
@@ -108,14 +108,15 @@ sub main {
 
     send_message($connection, {
         type      => 'worker_child_finished',
-        child_pid => $pid
+        child_pid => $pid,
+        exit_code => $exit_code
     });
 
     exit 0;
 }
 
 sub start_command_in_fork {
-    my ( $cmd ) = @_;
+    my ($cmd) = @_;
 
     my $cmd_temp_file = "./test_$token_safe_name.txt";
 
@@ -132,11 +133,11 @@ sub start_command_in_fork {
         or die "Can't open $cmd_temp_file : $@\n";
     binmode($fh);
 
-    return( $fh, $command_pid );
+    return($fh, $command_pid);
 }
 
 sub connect_to_websocket {
-    my ( $websocket_url ) = @_;
+    my ($websocket_url) = @_;
 
     my $ua = AnyEvent::WebSocket::Client->new;
 
@@ -155,12 +156,12 @@ sub connect_to_websocket {
 }
 
 sub setup_connection_service_hadlers {
-    my ( $tx ) = @_;
+    my ($tx) = @_;
 
     $tx->on(each_message => sub {
         # $connection is the same connection object
         # $message isa AnyEvent::WebSocket::Message
-        my ( $connection, $message ) = @_;
+        my ($connection, $message) = @_;
 
         my $hash = eval {decode_json($message->decoded_body())};
         if ($@) {
@@ -186,7 +187,7 @@ sub setup_connection_service_hadlers {
 }
 
 sub set_wait_for_child_timer {
-    my ( $child_pid, $tx, $exit_cv ) = @_;
+    my ($child_pid, $tx, $exit_cv) = @_;
 
     send_message($tx, {
         type      => 'worker_action_started',
@@ -204,13 +205,14 @@ sub set_wait_for_child_timer {
             });
         },
         sub {
-            $exit_cv->send();
+            my $current_code = shift;
+            $exit_cv->send($current_code);
         }
     );
 }
 
 sub setup_read_timer {
-    my ( $child_filehandle, $tx ) = @_;
+    my ($child_filehandle, $tx) = @_;
 
     my $timer = AnyEvent->timer(
         after    => 0,
@@ -222,11 +224,11 @@ sub setup_read_timer {
 }
 
 sub send_new_content {
-    my ( $child_filehandle, $tx ) = @_;
+    my ($child_filehandle, $tx) = @_;
     my $content = '';
     my $read_bytes = read($child_filehandle, $content, 1024 * 1024);
 
-    if (! defined $read_bytes) {
+    if (!defined $read_bytes) {
         warn "Read error\n";
     }
     elsif ($read_bytes) {
@@ -245,14 +247,14 @@ sub send_new_content {
 }
 
 sub wait_for_child {
-    my ( $c_pid, $run_cb, $finished_cb ) = @_;
+    my ($c_pid, $run_cb, $finished_cb) = @_;
 
     $wait_timer = AnyEvent->timer(after => 0, interval => $CHILD_INTERVAL, cb => sub {
         my $exit_code = waitpid($c_pid, WNOHANG);
         if ($exit_code == 0) {
             $run_cb->($exit_code);
         }
-        elsif ($exit_code == - 1) {
+        elsif ($exit_code == -1) {
             $action_log->debug("Child was reaped");
             $finished_cb->($exit_code);
         }
@@ -268,7 +270,7 @@ sub wait_for_child {
 }
 
 sub send_message {
-    my ( $tx, $msg ) = @_;
+    my ($tx, $msg) = @_;
 
     $msg->{token} = $token;
     eval {
