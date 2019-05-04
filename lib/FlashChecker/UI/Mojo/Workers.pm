@@ -241,10 +241,18 @@ sub client_seen_operations {
 
     my @to_delete = ();
     if (!$token) {
-        @to_delete = grep {$running{$_}->{client} eq $client_id && $running{$_}->{state} eq 'finished'} keys %running;
+        @to_delete = grep {
+            $running{$_}->{client} eq $client_id
+              && $running{$_}->{state} eq 'finished'
+        } keys %running;
+
         return unless @to_delete;
     }
     else {
+        if ($running{$token}{state} ne 'finished'){
+            $log->info('Seen on unfinished operation');
+            return;
+        }
         @to_delete = $token;
     }
 

@@ -72,7 +72,6 @@ Operations.prototype = {
         switch (message['type']) {
             case 'action_accepted':
                 operation = this.onActionAccepted(message, token);
-                // TODO: This one should only add new view
                 var view = this.getOperationView(token);
                 console.log(view);
                 this.appendOperationView(view);

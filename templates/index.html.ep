@@ -78,7 +78,7 @@ var OPTIONS = {
        <a role="button" data-toggle="collapse" data-parent="#operation-{{ token }}" href="#collapse{{ token }}" aria-expanded="false">
       {{ deviceId }} ( {{ action }} )
         </a>
-        <button type="button" class="btn btn-xs btn-default pull-right" id="operation-seen-button" data-token="{{ token }}">
+        <button type="button" class="btn btn-xs btn-default pull-right operation-seen-button" data-token="{{ token }}">
           <i class="glyphicon glyphicon-eye-close"></i>
         </button>
       </h4>
