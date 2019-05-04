@@ -17,7 +17,7 @@ var OPTIONS = {
       <div class="panel panel-heading">
         <h3 class="panel-title">
         <span>Operations</span>
-        <button type="button" class="btn btn-xs btn-default pull-right operation-seen-button">
+        <button type="button" class="btn btn-xs btn-default pull-right" id="operations-seen-button">
           <i class="glyphicon glyphicon-eye-close"></i>
         </button>
         </h3>

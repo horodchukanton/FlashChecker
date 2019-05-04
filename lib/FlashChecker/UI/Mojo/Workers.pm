@@ -239,6 +239,8 @@ sub render_command_template {
 sub client_seen_operations {
     my ($self, $client_id, $token) = @_;
 
+    $log->info("Received seen action");
+
     my @to_delete = ();
     if (!$token) {
         @to_delete = grep {

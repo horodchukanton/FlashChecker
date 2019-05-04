@@ -45,10 +45,10 @@ function Operations($container) {
     this.running = {};
     this.$container = $container;
 
+    this.updateView();
+
     // Initialize seen button
     $('button#operations-seen-button').on('click', this.onSeenClicked.bind(this));
-
-    this.updateView();
 }
 
 Operations.prototype = {
