@@ -38,10 +38,16 @@ function onActionButtonClicked() {
     operations.invokeAction(action, deviceId, $this);
 }
 
-function Operations() {
+function Operations($container) {
     this.sequence = 0;
     this.pending = [];
     this.running = {};
+    this.$container = $container;
+
+    var self = this;
+    Events.on('action_accepted', function () {
+        self.updateView();
+    })
 }
 
 Operations.prototype = {
@@ -59,12 +65,7 @@ Operations.prototype = {
 
         switch (message['type']) {
             case 'action_accepted':
-                var sequence = message['request_num'];
-                operation = this.pending.filter(function (value) {
-                    return value['request_num'] === sequence
-                })[0];
-                operation['state'] = 'started';
-                this.running[token] = operation;
+                operation = this.onActionAccepted(message, token);
                 break;
             case 'worker_action_started':
                 // Find the operation
@@ -95,15 +96,89 @@ Operations.prototype = {
             type: 'action_request'
         };
 
-        // HARM: result can return before we save the reference
-        ws.send(newOperation);
+        // Creating a copy with only this properties
+        var message = Object.assign({}, newOperation);
 
-        // Add it to temporary
+        // Adding other properties and saving
         newOperation['button'] = $button;
         newOperation['state'] = 'pending';
         this.pending.push(newOperation);
+
+        // Sending request
+        ws.send(message);
+
+        // Will proceed in an 'action_accepted' callback
+    },
+    onActionAccepted: function (message, token) {
+        var sequence = message['request_num'];
+        var index = -1;
+        for (var i = 0; i < this.pending.length; i++) {
+            if (this.pending[i]['request_num'] === sequence) {
+                index = i;
+                break;
+            }
+        }
+
+        if (index < 0) {
+            throw new Error("Accepted operation that was not pending");
+        }
+
+        var operation = this.pending[index];
+        operation['state'] = 'started';
+        this.running[token] = operation;
+
+        // Remove pending
+        this.pending.splice(index, 1);
+
+        Events.emit('device_renewed', operation['device_id']);
+
+        return operation;
+    },
+    isRunningFor: function (deviceId) {
+        var tokens = Object.keys(this.running);
+        for (var i = 0; i < tokens.length; i++) {
+            if (this.running[tokens[i]]['device_id'] === deviceId) {
+                return true
+            }
+        }
+        return false;
+    },
+    render: function () {
+        var tokens = Object.keys(this.running);
+
+        var $rendered = $('<div></div>', {id: 'operations-list'});
+
+        for (var i = 0; i < tokens.length; i++) {
+            var op = this.running[tokens[i]];
+            var operation_view = $(
+                '<p class="operation-view" id="' + tokens[i] + '">' +
+                '<span>' + op['device_id'] + '</span>' +
+                '<span>' + op['action'] + '</span>' +
+                '</p>'
+            );
+            $rendered.append(operation_view);
+        }
+
+        return $rendered;
+    },
+    toHtml: function (renew) {
+        if (typeof (this.$view) !== 'undefined' && !renew) {
+            return this.$view;
+        }
+
+        this.$view = this.render();
+
+        return this.$view;
+    },
+    updateView: function () {
+        var newView = this.toHtml(true);
+        console.log(this.$container);
+        console.log(newView);
+
+        $(this.$container).html(newView)
     }
 };
+
 
 function DevicesList($html) {
     this.devices = {};
@@ -113,6 +188,10 @@ function DevicesList($html) {
     Events.on('devices_renewed', function () {
         self.renewHtml()
     });
+    Events.on('device_renewed', function (id) {
+        self.devices[id].toHtml(true);
+        self.renewHtml()
+    })
 }
 
 DevicesList.prototype = {
@@ -129,7 +208,8 @@ DevicesList.prototype = {
                 this.remove(message['id']);
                 break;
             case 'list':
-                this.renew(message['devices']);
+                this.renewDevices(message['devices']);
+                Events.emit('devices_renewed');
                 break;
             default:
                 console.log("DevicesList received wrong message:", message)
@@ -145,7 +225,7 @@ DevicesList.prototype = {
     remove: function (deviceId) {
         delete this.devices[deviceId];
     },
-    renew: function (deviceInfoList) {
+    renewDevices: function (deviceInfoList) {
         var self = this;
         deviceInfoList.forEach(function (devInfo) {
             self.add(self.createUsbDevice(devInfo));
@@ -153,9 +233,15 @@ DevicesList.prototype = {
     },
     renewHtml: function () {
         this.$html.html(this.toHtml());
+
+        // Avoiding duplicate handlers
+        this.$html.find('button.btn-action').off('click', onActionButtonClicked);
         this.$html.find('button.btn-action').on('click', onActionButtonClicked);
     },
-    toHtml: function () {
+    toHtml: function (renew) {
+        if (typeof (this.$view) !== 'undefined' && !renew) {
+            return this.$view;
+        }
         var deviceIds = Object.keys(this.devices);
 
         var $div_list = $('<div></div>', {'id': 'flash-list'});
@@ -165,17 +251,21 @@ DevicesList.prototype = {
                 var id = deviceIds[i];
                 $div_list.append(this.devices[id].toHtml())
             }
-        } else {
-            $div_list.append('No devices');
+        }
+        else {
+            $div_list.append('<p>No devices</p>');
         }
 
-        return $div_list;
+        this.$view = $div_list;
+
+        return this.$view;
     }
 };
 
 function USBDevice(id, attributes) {
     this.deviceId = id;
     this.info = attributes;
+    this.$view = null;
 }
 
 USBDevice.prototype = {
@@ -201,7 +291,7 @@ USBDevice.prototype = {
     getDescription: function () {
         return this.info['Description'];
     },
-    toHtml: function () {
+    render: function () {
         var rendered = Mustache.render(usbTemplate, {
             id: this.getId(),
             root: this.getRootName(),
@@ -211,9 +301,26 @@ USBDevice.prototype = {
             actions: this.getActions()
         });
 
-        this.$html = $(rendered);
+        return $(rendered);
+    },
+    toHtml: function (renew) {
+        if (typeof (this.$view) !== 'undefined' && !renew) {
+            this.$view = this.render()
+        }
+        return this.$view;
+    },
+    setProgress: function (current, total) {
+        this.progress = 100 / (total / current);
+    },
+    renewProgressBar: function () {
+        var $progressBar = this.$view.find('div.progress-bar');
 
-        return this.$html;
+        if (operations.isRunningFor(this.getId())) {
+            $progressBar.addClass('active');
+        }
+
+        this.progress = this.progress || 0;
+        $progressBar.attr({style: "width:" + this.progress + '%' + ";"});
     }
 };
 
@@ -241,4 +348,3 @@ $(function () {
 document.onunload = function () {
     ws.request_close_socket()
 };
-

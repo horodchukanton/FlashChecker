@@ -14,7 +14,7 @@ my $log = Mojo::Log->new();
 my %running = ();
 
 sub new {
-    my ( $class, %params ) = @_;
+    my ($class, %params) = @_;
     my $self = { %params };
     bless $self, $class;
     return $self;
@@ -38,7 +38,7 @@ sub events {return shift->{events}}
 
 =cut
 sub start_operation {
-    my ( $self, $params ) = @_;
+    my ($self, $params) = @_;
 
     my $token = md5_hex($params->{device_id} . $params->{action}) . '==';
 
@@ -82,7 +82,7 @@ sub start_operation {
 }
 
 sub spawn_worker {
-    my ( $self, $command ) = @_;
+    my ($self, $command) = @_;
 
     if ($^O eq 'MSWin32') {
         return system(1, $command);
@@ -99,22 +99,20 @@ sub spawn_worker {
 }
 
 sub worker_message {
-    my ( $self, $message ) = @_;
+    my ($self, $message) = @_;
 
     my $message_type = $message->{type};
     my $worker_token = $message->{token};
 
-    if (! exists $running{$worker_token}) {
+    if (!exists $running{$worker_token}) {
         $log->warn('UNREGISTERED WORKER TOKEN');
-        $self->emit_for_token($worker_token, 'ALL', $message);
+        $self->emit_for_token($worker_token, $message);
         return;
     }
 
-    my $client_id = $running{$worker_token}->{client};
-
     if ($message_type eq 'worker_action_started') {
         $log->info("Worker said that he started an operation");
-        $self->emit_for_token($worker_token, $message);
+        $self->emit_for_token($worker_token, $message, 'worker_started');
     }
     elsif ($message_type eq 'worker_child_running') {
         $log->info("Worker is running");
@@ -123,7 +121,7 @@ sub worker_message {
     elsif ($message_type eq 'worker_child_finished') {
         $log->info("Worker has finished, can now clear running token");
         $self->finished_operation($worker_token);
-        $self->emit_for_token($worker_token, $message);
+        $self->emit_for_token($worker_token, $message, 'worker_finished');
     }
     elsif ($message_type eq 'worker_output') {
         $log->info("Worker returns output: '$message->{content}'");
@@ -142,13 +140,13 @@ sub worker_message {
 }
 
 sub output_updated {
-    my ( $self, $token, $content ) = @_;
+    my ($self, $token, $content) = @_;
     # Should add it to info
     push @{$running{$token}->{info}}, $content;
 }
 
 sub finished_operation {
-    my ( $self, $token, $was_error ) = @_;
+    my ($self, $token, $was_error) = @_;
 
     push @{$running{$token}->{info}}, { type => $was_error ? 'ERROR' : 'FINISHED' };
 
@@ -165,13 +163,13 @@ sub cancel_operation {
 }
 
 sub has_info {
-    my ( $self, $token, $offset ) = @_;
+    my ($self, $token, $offset) = @_;
 
     my $job = $running{$token};
 
     my $ret;
 
-    if (! exists $job->{info}) {
+    if (!exists $job->{info}) {
         return {
             type  => 'operation_no_info_available',
             token => $token
@@ -204,16 +202,16 @@ sub has_info {
 }
 
 sub who_started {
-    my ( $self, $token ) = @_;
+    my ($self, $token) = @_;
     my $job = $running{$token};
-    if (! $job) {
+    if (!$job) {
         return 0;
     }
     return $job->{client_id};
 }
 
 sub build_return_url {
-    my ( $self ) = @_;
+    my ($self) = @_;
 
     my $host = $self->{config}->{Listen}->{Address} || '127.0.0.1';
     my $port = $self->{config}->{Listen}->{Port} || '8080';
@@ -226,7 +224,7 @@ sub build_return_url {
 }
 
 sub render_command_template {
-    my ( $cmd_template, $params ) = @_;
+    my ($cmd_template, $params) = @_;
 
     for (keys %$params) {
         $cmd_template =~ s/\{\{ +$_ +\}\}/$params->{$_}/g;
@@ -236,10 +234,12 @@ sub render_command_template {
 }
 
 sub emit_for_token {
-    my ( $self, $token, $event ) = @_;
+    my ($self, $token, $event, $message_type) = @_;
+    $message_type ||= 'worker_event';
+
     my $client = $running{$token}->{client};
 
-    $self->events->emit('worker_event', $token, $client, $event);
+    $self->events->emit($message_type, $token, $client, $event);
 }
 
 1;

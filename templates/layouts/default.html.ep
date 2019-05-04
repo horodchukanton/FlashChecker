@@ -11,6 +11,7 @@
   <script src="/js/vendor/jquery.min.js"></script>
 </head>
 <body><%= content %>
+<script src="/js/compat.js"></script>
 <script src="/js/bootstrap.min.js"></script>
 <script src="/js/events.js"></script>
 <script src="/js/websocket_client.js"></script>

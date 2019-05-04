@@ -46,7 +46,7 @@ var OPTIONS = {
       <div class="row">
         <div class="col-md-12">
          <div class="progress" style="margin-bottom:0">
-          <div class="progress-bar progress-bar-success"></div>
+          <div class="progress-bar progress-bar-striped progress-bar-success"></div>
          </div>
         </div>
       </div>
