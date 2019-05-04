@@ -4,7 +4,7 @@ use warnings FATAL => 'all';
 
 use Data::Dumper;
 
-my $WIN_ATTRS = 'filesystem,size,volumeserialnumber,deviceid,filesystem,description';
+my $WIN_ATTRS = 'filesystem,size,freespace,volumeserialnumber,deviceid,description';
 use USB::_Execute qw/execute/;
 
 sub new {

@@ -262,6 +262,14 @@ sub process_events {
                 id   => $event->{id}
             });
         }
+        elsif ($event->{type} eq 'changed') {
+            return unless $event->{id};
+            $self->clients->notify_all({
+                type   => 'changed',
+                id     => $event->{id},
+                device => { %{$event->{device}} }
+            });
+        }
         elsif ($event->{type} eq 'connected') {
             return unless $event->{id};
             $self->new_device_connected({ %{$event->{device}} });
