@@ -66,8 +66,6 @@ Operations.prototype = {
         var token = message['token'];
         var operation;
 
-        console.log(token, message['type']);
-
         switch (message['type']) {
             case 'action_accepted':
                 operation = this.onActionAccepted(message, token);
@@ -262,9 +260,9 @@ Operations.prototype = {
 };
 
 
-function DevicesList($html) {
+function DevicesList($container) {
     this.devices = {};
-    this.$html = $html;
+    this.$container = $container;
 
     var self = this;
     Events.on('devices_renewed', function () {
@@ -277,12 +275,11 @@ function DevicesList($html) {
 }
 
 DevicesList.prototype = {
-    _message_types: ['connected', 'removed', 'list'],
+    _message_types: ['connected', 'removed', 'list', 'changed'],
     isResponsibleFor: function (messageType) {
         return this._message_types.indexOf(messageType) >= 0
     },
     onMessage: function (message) {
-        console.log("DevicesList", message);
         switch (message['type']) {
             case 'connected':
                 this.add(this.createUsbDevice(message['device']));
@@ -291,6 +288,9 @@ DevicesList.prototype = {
             case 'removed':
                 this.remove(message['id']);
                 this.renewHtml();
+                break;
+            case 'changed':
+                this.renewDevice(message['id'], message['device']);
                 break;
             case 'list':
                 this.renewDevices(message['devices']);
@@ -307,6 +307,13 @@ DevicesList.prototype = {
     add: function (usbDevice) {
         this.devices[usbDevice.getId()] = usbDevice;
     },
+    renewDevice: function (deviceId, newInfo) {
+        // For now I know only FreeSpace and VolumeSerialNumber can be changed
+        // TODO: update and render all info
+
+        var device = this.devices[deviceId];
+        device.setProgress(newInfo['Size'] - newInfo['FreeSpace'], newInfo['Size']);
+    },
     remove: function (deviceId) {
         delete this.devices[deviceId];
     },
@@ -317,11 +324,11 @@ DevicesList.prototype = {
         });
     },
     renewHtml: function () {
-        this.$html.html(this.toHtml(true));
+        this.$container.html(this.toHtml(true));
 
         // Avoiding duplicate handlers
-        this.$html.find('button.btn-action').off('click', onActionButtonClicked);
-        this.$html.find('button.btn-action').on('click', onActionButtonClicked);
+        this.$container.find('button.btn-action').off('click', onActionButtonClicked);
+        this.$container.find('button.btn-action').on('click', onActionButtonClicked);
     },
     toHtml: function (renew) {
         if (typeof (this.$view) !== 'undefined' && !renew) {
@@ -394,6 +401,7 @@ USBDevice.prototype = {
     },
     setProgress: function (current, total) {
         this.progress = 100 / (total / current);
+        this.renewProgressBar();
     },
     renewProgressBar: function () {
         var $progressBar = this.$view.find('div.progress-bar');
