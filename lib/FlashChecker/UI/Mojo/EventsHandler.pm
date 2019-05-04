@@ -17,7 +17,7 @@ my $log = Mojo::Log->new;
 my $event_emitter = Mojo::EventEmitter->new();
 
 sub new {
-    my ( $class, $config ) = @_;
+    my ($class, $config) = @_;
 
     my $self = {
         clients  => FlashChecker::UI::Mojo::Clients->new(
@@ -36,7 +36,7 @@ sub new {
 }
 
 sub start {
-    my ( $self, $queue ) = @_;
+    my ($self, $queue) = @_;
 
     my $config = $self->{config};
 
@@ -60,17 +60,17 @@ sub workers {
 
 #@returns USB::Listener
 sub listener {
-    my ( $self ) = @_;
+    my ($self) = @_;
     return $self->{listener};
 }
 
 sub init_events {
-    my ( $self ) = @_;
+    my ($self) = @_;
     $event_emitter->on(
         'worker_event' => sub {
-            my ( $emitter, $token, $cl_id, $event ) = @_;
+            my ($emitter, $token, $cl_id, $event, $type) = @_;
             $self->clients->send_message($cl_id, {
-                type  => 'worker_event',
+                type  => $type || 'worker_event',
                 token => $token,
                 event => $event
             });
@@ -79,7 +79,7 @@ sub init_events {
 }
 
 sub websocket_message {
-    my ( $self, $mojo ) = @_;
+    my ($self, $mojo) = @_;
 
     my $cl_id = $self->clients->add($mojo, $mojo->tx);
 
@@ -89,9 +89,9 @@ sub websocket_message {
 
             # Passing technical messages
             my $operation_message = $clients->on_message($cl_id, @_);
-            return if (! $operation_message);
+            return if (!$operation_message);
 
-            my ( undef, $hash ) = @_;
+            my (undef, $hash) = @_;
             $self->_on_command_message($cl_id, $hash);
         },
         finish => sub {$self->clients->disconnected($cl_id)}
@@ -101,7 +101,7 @@ sub websocket_message {
 }
 
 sub _on_command_message {
-    my ( $self, $cl_id, $msg ) = @_;
+    my ($self, $cl_id, $msg) = @_;
 
     if ('request_list' eq $msg->{type}) {
         my $list = $self->listener->get_list_of_devices();
@@ -134,10 +134,16 @@ sub _on_command_message {
         $self->clients->send_message($cl_id, $response);
     }
     elsif ('action_info_request' eq $msg->{type}) {
-        my ( $token, $offset ) = ( $msg->{token}, $msg->{offset} );
+        my ($token, $offset) = ($msg->{token}, $msg->{offset});
         if (my $info = $self->workers->has_info($token, $offset || 0)) {
             $self->clients->send_message($cl_id, $info);
         }
+    }
+    elsif ('action_operation_seen' eq $msg->{type}) {
+        $self->workers->client_seen_operations($cl_id, $msg->{token});
+    }
+    elsif ('action_all_operations_seen' eq $msg->{type}) {
+        $self->workers->client_seen_operations($cl_id);
     }
     elsif ('action_cancel_request' eq $msg->{type}) {
         my $token = $msg->{token};
@@ -156,7 +162,7 @@ sub _on_command_message {
 };
 
 sub _on_operation_request {
-    my ( $self, $client_id, $action, $device_id ) = @_;
+    my ($self, $client_id, $action, $device_id) = @_;
 
     unless ($device_id) {
         $log->warn("No device id to return info");
@@ -165,11 +171,11 @@ sub _on_operation_request {
 
     my $actions = $self->get_actions($device_id);
 
-    if (! grep {$_ eq $action} @$actions) {
+    if (!grep {$_ eq $action} @$actions) {
         $log->warn("Request for unsupported action: '$action'");
         return _error_message("Request for an unsupported action: '$action'");
     }
-    if (! grep {$_ eq $action} keys %{$self->{actions}}) {
+    if (!grep {$_ eq $action} keys %{$self->{actions}}) {
         $log->warn("Request for unimplemented action: '$action'");
         return _error_message("Request for an unsupported action: '$action'");
     }
@@ -199,21 +205,21 @@ sub _on_operation_request {
 }
 
 sub executor_response {
-    my ( $self, $token, $response ) = @_;
+    my ($self, $token, $response) = @_;
 
     print "CLIENT: $token\n SENT: $response\n";
 }
 
 
 sub get_actions {
-    my ( $self, $device_id ) = @_;
+    my ($self, $device_id) = @_;
 
     my %all_actions = %{$self->{actions}};
 
     my $device = $self->listener->get_device_info($device_id);
 
     # 'Check' requires device to be mounted
-    if (! $device->{VolumeSerialNumber}) {
+    if (!$device->{VolumeSerialNumber}) {
         delete $all_actions{Check};
     }
 
@@ -221,7 +227,7 @@ sub get_actions {
 }
 
 sub check_queue {
-    my ( $self, $queue ) = @_;
+    my ($self, $queue) = @_;
     # $log->debug("Checking the queue. ");
 
     $self->{checker} = Mojo::IOLoop->timer($self->{period} => sub {
@@ -240,7 +246,7 @@ sub check_queue {
 }
 
 sub process_events {
-    my ( $self, $queue ) = @_;
+    my ($self, $queue) = @_;
     $log->debug("Processing, we have " . $self->clients->count . " client(s).");
 
     while (my $event = $queue->dequeue_nb()) {
@@ -269,7 +275,7 @@ sub process_events {
 }
 
 sub new_device_connected {
-    my ( $self, $device_info ) = @_;
+    my ($self, $device_info) = @_;
 
     $self->_inflate_device_info($device_info);
 
@@ -283,7 +289,7 @@ sub new_device_connected {
 }
 
 sub _inflate_device_info {
-    my ( $self, $device_info ) = @_;
+    my ($self, $device_info) = @_;
     my $id = $device_info->{id};
 
     $device_info->{Actions} = $self->get_actions($id);
@@ -292,7 +298,7 @@ sub _inflate_device_info {
 }
 
 sub _error_message {
-    my ( $message ) = @_;
+    my ($message) = @_;
     return {
         type    => 'error',
         message => $message

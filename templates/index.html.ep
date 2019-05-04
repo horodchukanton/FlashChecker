@@ -14,7 +14,14 @@ var OPTIONS = {
   </div>
   <div class="col-md-4">
     <div class="panel panel-default">
-      <div class="panel panel-heading"><h3 class="panel-title">Operations</h3></div>
+      <div class="panel panel-heading">
+        <h3 class="panel-title">
+        <span>Operations</span>
+        <button type="button" class="btn btn-xs btn-default pull-right operation-seen-button">
+          <i class="glyphicon glyphicon-eye-close"></i>
+        </button>
+        </h3>
+      </div>
       <div class="panel-body">
       <div class="row">
         <div class="col-md-12">
@@ -55,6 +62,34 @@ var OPTIONS = {
     {{#actions}}
       <button type="button" class="btn btn-primary btn-action"
        data-deviceId="{{ id }}" data-action="{{.}}"
+       >{{.}}</button>
+    {{/actions}}
+    </div>
+  </div>
+</div>
+</script>
+
+
+<script id="operation-template" type="x-tmpl-mustache">
+<div class="col-md-6 operation-view" data-token="{{ id }}" id="operation-{{ token }}">
+  <div class="panel panel-default operation-panel">
+    <div class="panel-heading">
+      <h4 class="panel-title">
+       <a role="button" data-toggle="collapse" data-parent="#operation-{{ token }}" href="#collapse{{ token }}" aria-expanded="false">
+      {{ deviceId }} ( {{ action }} )
+        </a>
+        <button type="button" class="btn btn-xs btn-default pull-right" id="operation-seen-button" data-token="{{ token }}">
+          <i class="glyphicon glyphicon-eye-close"></i>
+        </button>
+      </h4>
+    </div>
+    <div id="collapse{{ token }}" class="panel-collapse collapse" role="tabpanel">
+      <div class="panel-body"></div>
+    </div>
+    <div class="panel-footer operation-actions">
+    {{#actions}}
+      <button type="button" class="btn btn-primary btn-action"
+       data-token="{{ token }}" data-action="{{.}}"
        >{{.}}</button>
     {{/actions}}
     </div>

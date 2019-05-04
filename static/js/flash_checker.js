@@ -2,6 +2,7 @@
 var ws = null;
 var devicesList = null;
 var usbTemplate = null;
+var operationTemplate = null;
 var operations = null;
 
 function processMessage(message) {
@@ -44,17 +45,20 @@ function Operations($container) {
     this.running = {};
     this.$container = $container;
 
-    var self = this;
-    Events.on('action_accepted', function () {
-        self.updateView();
-    })
+    // Initialize seen button
+    $('button#operations-seen-button').on('click', this.onSeenClicked.bind(this));
+
+    this.updateView();
 }
 
 Operations.prototype = {
     _message_types: [
         'action_accepted',
         'worker_action_started',
-        'worker_event'
+        'worker_output',
+        'worker_action_finished',
+        'worker_event',
+        'operation_event'
     ],
     isResponsibleFor: function (messageType) {
         return this._message_types.indexOf(messageType) >= 0
@@ -63,26 +67,101 @@ Operations.prototype = {
         var token = message['token'];
         var operation;
 
+        console.log(token, message['type']);
+
         switch (message['type']) {
             case 'action_accepted':
                 operation = this.onActionAccepted(message, token);
+                // TODO: This one should only add new view
+                var view = this.getOperationView(token);
+                console.log(view);
+                this.appendOperationView(view);
                 break;
             case 'worker_action_started':
                 // Find the operation
-                operation = this.running[token];
+                operation = this.findOperation(token);
                 operation['state'] = 'running';
-                // Run the progress bar
+                this.setOperationViewClass(token, 'info');
+                break;
+            case 'worker_output':
+                var output = message['event']['content'];
+                this.getOutputBody(token)
+                    .append($('<p></p>').text(output));
+                break;
+            case 'worker_action_finished':
+                operation = this.onActionFinished(message, token);
+                //TODO: check finished code
+                this.setOperationViewClass(token, 'success');
                 break;
             case 'worker_event':
-                operation = this.running[token];
-                if (message['event']['type'] === 'worker_child_finished') {
-                    operation.state = 'finished';
+                operation = this.findOperation(token);
+                break;
+            case 'operation_event':
+                if (message['event']['type'] === 'operation_removed') {
+                    // Delete view
+                    var view = this.getOperationView(token);
+                    view.remove();
+
+                    // Delete from cache
+                    delete this.running[token];
                 }
                 break;
             default:
                 console.log("Operations received wrong message:", message);
         }
         Events.emit(message['type'], operation);
+    },
+    findOperation: function (token) {
+        var operation = this.running[token];
+        if (typeof (operation) === 'undefined') {
+            console.trace();
+            throw "Somebody looked for an unexisting operation"
+        }
+        return operation;
+    },
+    getOperationView: function (token) {
+        var $found = this.$container.find('div#operation-' + token);
+        if ($found.length < 1) {
+            $found = this.renderOperationView(token);
+            this.appendOperationView($found);
+        }
+
+        return $found;
+    },
+    appendOperationView: function (view) {
+        this.$container.find('div#operations-list')
+            .append(view);
+    },
+    renderOperationView: function (token) {
+        var op = this.findOperation(token);
+        var view = Mustache.render(operationTemplate, {
+            token: token,
+            deviceId: op.device_id,
+            action: op.action
+        });
+
+        var $view = $(view);
+
+        var self = this;
+        $view.find('button.operation-seen-button').on('click', function () {
+            self.onOperationSeenClicked(token);
+        });
+
+        return $view;
+    },
+    setOperationViewClass: function (token, new_class) {
+        var view = this.getOperationView(token);
+        var panel = view.find('div.operation-panel');
+        panel.removeClass('panel-default');
+        panel.removeClass('panel-success');
+        panel.removeClass('panel-info');
+        panel.removeClass('panel-warning');
+        panel.removeClass('panel-danger');
+        panel.addClass('panel-' + new_class);
+    },
+    getOutputBody: function (token) {
+        var view = this.getOperationView(token);
+        return view.find('div#collapse' + token).find('div.panel-body')
     },
     invokeAction: function (action, deviceId, $button) {
         if (!action && deviceId) {
@@ -111,6 +190,8 @@ Operations.prototype = {
     },
     onActionAccepted: function (message, token) {
         var sequence = message['request_num'];
+
+        // Find the pending one
         var index = -1;
         for (var i = 0; i < this.pending.length; i++) {
             if (this.pending[i]['request_num'] === sequence) {
@@ -134,6 +215,22 @@ Operations.prototype = {
 
         return operation;
     },
+    onActionFinished: function (message, token) {
+        var operation = this.findOperation(token);
+
+        // TODO: check action success/failure
+        console.log('finished', message);
+
+        operation['state'] = 'finished';
+
+        return operation;
+    },
+    onSeenClicked: function () {
+        ws.send({type: 'action_all_operations_seen'});
+    },
+    onOperationSeenClicked: function (token) {
+        ws.send({type: 'action_operation_seen', token: token});
+    },
     isRunningFor: function (deviceId) {
         var tokens = Object.keys(this.running);
         for (var i = 0; i < tokens.length; i++) {
@@ -145,20 +242,10 @@ Operations.prototype = {
     },
     render: function () {
         var tokens = Object.keys(this.running);
-
         var $rendered = $('<div></div>', {id: 'operations-list'});
-
         for (var i = 0; i < tokens.length; i++) {
-            var op = this.running[tokens[i]];
-            var operation_view = $(
-                '<p class="operation-view" id="' + tokens[i] + '">' +
-                '<span>' + op['device_id'] + '</span>' +
-                '<span>' + op['action'] + '</span>' +
-                '</p>'
-            );
-            $rendered.append(operation_view);
+            $rendered.append(this.getOperationView(tokens[i]));
         }
-
         return $rendered;
     },
     toHtml: function (renew) {
@@ -172,9 +259,6 @@ Operations.prototype = {
     },
     updateView: function () {
         var newView = this.toHtml(true);
-        console.log(this.$container);
-        console.log(newView);
-
         $(this.$container).html(newView)
     }
 };
@@ -251,8 +335,7 @@ DevicesList.prototype = {
                 var id = deviceIds[i];
                 $div_list.append(this.devices[id].toHtml())
             }
-        }
-        else {
+        } else {
             $div_list.append('<p>No devices</p>');
         }
 
@@ -343,6 +426,10 @@ $(function () {
     // Parsing USB template
     usbTemplate = $('#usb-template').html();
     Mustache.parse(usbTemplate);
+
+    operationTemplate = $('#operation-template').html();
+    Mustache.parse(operationTemplate);
+
 });
 
 document.onunload = function () {

@@ -40,7 +40,7 @@ sub events {return shift->{events}}
 sub start_operation {
     my ($self, $params) = @_;
 
-    my $token = md5_hex($params->{device_id} . $params->{action}) . '==';
+    my $token = md5_hex($params->{device_id} . $params->{action});
 
     if (exists $running{$token}) {
         return {
@@ -106,27 +106,32 @@ sub worker_message {
 
     if (!exists $running{$worker_token}) {
         $log->warn('UNREGISTERED WORKER TOKEN');
-        $self->emit_for_token($worker_token, $message);
+        $self->emit_for_token($worker_token, $message, 'worker_unregistered_token');
         return;
     }
 
     if ($message_type eq 'worker_action_started') {
         $log->info("Worker said that he started an operation");
-        $self->emit_for_token($worker_token, $message, 'worker_started');
+        $running{$worker_token}->{state} = 'started';
+
+        $self->emit_for_token($worker_token, $message, 'worker_action_started');
     }
     elsif ($message_type eq 'worker_child_running') {
-        $log->info("Worker is running");
-        $self->emit_for_token($worker_token, $message);
+        $log->debug("Worker $worker_token is running");
+        $running{$worker_token}->{state} = 'running';
+
+        # $self->emit_for_token($worker_token, $message);
     }
     elsif ($message_type eq 'worker_child_finished') {
-        $log->info("Worker has finished, can now clear running token");
+        $log->info("Worker $worker_token finished");
+        $running{$worker_token}->{state} = 'finished';
         $self->finished_operation($worker_token);
-        $self->emit_for_token($worker_token, $message, 'worker_finished');
+        $self->emit_for_token($worker_token, $message, 'worker_action_finished');
     }
     elsif ($message_type eq 'worker_output') {
         $log->info("Worker returns output: '$message->{content}'");
         $self->output_updated($worker_token, $message->{content});
-        $self->emit_for_token($worker_token, $message);
+        $self->emit_for_token($worker_token, $message, 'worker_output');
     }
     elsif ($message_type eq 'worker_me_crashed') {
         $log->info("Worker crashed. Why Windows, WHY???");
@@ -150,9 +155,7 @@ sub finished_operation {
 
     push @{$running{$token}->{info}}, { type => $was_error ? 'ERROR' : 'FINISHED' };
 
-    $running{$token}->{on_request_cb} = sub {
-        delete $running{$token};
-    };
+    return 1;
 }
 
 sub cancel_operation {
@@ -233,13 +236,33 @@ sub render_command_template {
     return $cmd_template;
 }
 
+sub client_seen_operations {
+    my ($self, $client_id, $token) = @_;
+
+    my @to_delete = ();
+    if (!$token) {
+        @to_delete = grep {$running{$_}->{client} eq $client_id && $running{$_}->{state} eq 'finished'} keys %running;
+        return unless @to_delete;
+    }
+    else {
+        @to_delete = $token;
+    }
+
+    for (@to_delete) {
+        $self->emit_for_token($_, { type => 'operation_removed' }, 'operation_event')
+    }
+
+    delete @running{@to_delete};
+    $log->info('Removed tokens:' . join(', ', @to_delete));
+
+    return 1;
+}
+
 sub emit_for_token {
     my ($self, $token, $event, $message_type) = @_;
-    $message_type ||= 'worker_event';
-
     my $client = $running{$token}->{client};
 
-    $self->events->emit($message_type, $token, $client, $event);
+    $self->events->emit('worker_event', $token, $client, $event, $message_type);
 }
 
 1;
