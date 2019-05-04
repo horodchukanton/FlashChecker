@@ -16,7 +16,6 @@ function processMessage(message) {
         operations.onMessage(message)
     } else if (devicesList.isResponsibleFor(messageType)) {
         devicesList.onMessage(message);
-        Events.emit('devices_renewed');
     } else {
         switch (messageType) {
             case 'restarted':
@@ -283,16 +282,19 @@ DevicesList.prototype = {
         return this._message_types.indexOf(messageType) >= 0
     },
     onMessage: function (message) {
+        console.log("DevicesList", message);
         switch (message['type']) {
             case 'connected':
                 this.add(this.createUsbDevice(message['device']));
+                this.renewHtml();
                 break;
             case 'removed':
                 this.remove(message['id']);
+                this.renewHtml();
                 break;
             case 'list':
                 this.renewDevices(message['devices']);
-                Events.emit('devices_renewed');
+                this.renewHtml();
                 break;
             default:
                 console.log("DevicesList received wrong message:", message)
@@ -315,7 +317,7 @@ DevicesList.prototype = {
         });
     },
     renewHtml: function () {
-        this.$html.html(this.toHtml());
+        this.$html.html(this.toHtml(true));
 
         // Avoiding duplicate handlers
         this.$html.find('button.btn-action').off('click', onActionButtonClicked);
@@ -326,7 +328,6 @@ DevicesList.prototype = {
             return this.$view;
         }
         var deviceIds = Object.keys(this.devices);
-
         var $div_list = $('<div></div>', {'id': 'flash-list'});
 
         if (deviceIds.length > 0) {
