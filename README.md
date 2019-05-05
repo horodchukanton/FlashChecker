@@ -21,6 +21,7 @@ Mind his work too.
  * ~~Buttons for bulk operations~~
  * ~~Cancel operation button~~ 
  * * Now debug why it doesn't work and uncomment the button
+ * ~~Append Actions to the 'changed' device information~~
  * Debug log in a separate window
  * Mechanics to create "support" zip file with all the logs
  * Allow to mask a device ( hide it from the UI ), so you will not format your personal device

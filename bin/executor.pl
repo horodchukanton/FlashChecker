@@ -67,20 +67,29 @@ if (!$return_url) {
 my $wait_timer;
 my $seek_timer;
 
-my ($cfh, $pid) = start_command_in_fork($command);
+# Here the command output will be stored
+my $cmd_temp_file = "./test_$token_safe_name.txt";
+
+my ($cfh, $pid) = start_command_in_fork($command, $cmd_temp_file);
 
 # Saving command log
 {
-    my $cmd_log = Mojo::Log->new()->path("cmd_log.txt");
+    if (! -d 'logs' && !mkdir 'logs'){
+        die " Failed to create logs folder \n";
+    }
+    my $cmd_log = Mojo::Log->new()->path("logs/cmd_log.txt");
     $cmd_log->info("command : " . $command, " return_url : " . $return_url);
     undef $cmd_log;
 }
 
-unlink "action_$token_safe_name.txt";
-my $action_log = Mojo::Log->new->path("action_$token_safe_name.txt");
+unlink "logs/action_$token_safe_name.txt";
+my $action_log = Mojo::Log->new->path("logs/action_$token_safe_name.txt");
 $action_log->info("Started with return url: '$return_url'");
 
 main($return_url, $pid, $cfh);
+
+unlink $cmd_temp_file if (-e $cmd_temp_file);
+exit 0;
 
 sub main {
     my ($websocket_url, $child_pid, $child_filehandle) = @_;
@@ -112,25 +121,22 @@ sub main {
         exit_code => $exit_code
     });
 
-    exit 0;
 }
 
 sub start_command_in_fork {
-    my ($cmd) = @_;
-
-    my $cmd_temp_file = "./test_$token_safe_name.txt";
-
+    my ($cmd, $temp_file) = @_;
+# undef $temp_file;
     # Create temporary file so we are not opening it before it is created by a command
-    open(my $tfh, '>', $cmd_temp_file)
-        or die "Can't create test file $cmd_temp_file: $@\n";
+    open(my $tfh, '>', $temp_file)
+        or die "Can't create test file $temp_file: $@\n";
     # Cleaning file
     print $tfh "";
     close($tfh);
 
-    my $command_pid = system(1, "$cmd > $cmd_temp_file");
+    my $command_pid = system(1, "$cmd > $temp_file");
 
-    open(my $fh, '<', "$cmd_temp_file")
-        or die "Can't open $cmd_temp_file : $@\n";
+    open(my $fh, '<', "$temp_file")
+        or die "Can't open $temp_file : $@\n";
     binmode($fh);
 
     return($fh, $command_pid);
