@@ -7,9 +7,9 @@ Actions that can be performed on a device are stored in the 'config.ini' file as
 Check that config contains something meaningful for your setup. 
 This chapter will be extended
 
-## Open Source
-The bin folder contains the 'disk-filltest.exe'. It is borrowed from https://github.com/bingmann/disk-filltest
-Mind his work too.
+## ACKNOWLEDGMENTS
+The bin folder contains the 'disk-filltest.exe'. It is borrowed from https://github.com/bingmann/disk-filltest \
+Mind bingmann's work too and possibly star his repository.
 
 
 ## TODO
@@ -26,8 +26,8 @@ Mind his work too.
  * Acknowledge the master for executor connection before operation started
  * Mechanics to create "support" zip file with all the logs
  * Allow to mask a device ( hide it from the UI ), so you will not format your personal device
- * Allow some configuration to be changed through the UI
- * Client session persistence (allow to refresh the page saving the work) - client cookie
+ * Allow some configuration to be changed through the UI (Should investigate what should be configured first)
+ * Client session persistence (allow to refresh the page, with operations refresh) - client cookie
  * Gradle build
  * Tests :)
  * ~~Logs in a separate folder~~

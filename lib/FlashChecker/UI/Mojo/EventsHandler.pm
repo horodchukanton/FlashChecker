@@ -276,11 +276,14 @@ sub process_events {
         }
         elsif ($event->{type} eq 'changed') {
             return unless $event->{id};
-            my $device = $self->_inflate_device_info($event->{device});
+
+            my %device_info = ( %{$event->{device} } );
+            $self->_inflate_device_info(\%device_info);
+
             $self->clients->notify_all({
                 type   => 'changed',
                 id     => $event->{id},
-                device => $device
+                device => \%device_info
             });
         }
         elsif ($event->{type} eq 'connected') {

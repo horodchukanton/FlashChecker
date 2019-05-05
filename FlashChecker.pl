@@ -4,8 +4,9 @@ use warnings FATAL => 'all';
 
 our $Bin;
 BEGIN {
-  use FindBin '$Bin';
-  unshift @INC, "$Bin/lib";
+    use FindBin '$Bin';
+    # unshift @INC, "$Bin/lib/vendor/lib/perl5/";
+    unshift @INC, "$Bin/lib";
 }
 
 use FlashChecker;
