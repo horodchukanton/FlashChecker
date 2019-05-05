@@ -67,10 +67,22 @@ sub listener {
 sub init_events {
     my ($self) = @_;
     $event_emitter->on(
-        'worker_event' => sub {
+        'worker_event'      => sub {
             my ($emitter, $token, $cl_id, $event, $type) = @_;
             $self->clients->send_message($cl_id, {
                 type  => $type || 'worker_event',
+                token => $token,
+                event => $event
+            });
+        },
+        'message_to_worker' => sub {
+            my ($emitter, $token, $cl_id, $event, $type) = @_;
+
+            # For now, I can't see anything useful, except 'action_cancelled',
+            # but we can send anything else
+
+            $self->clients->send_message($cl_id, {
+                type  => $type || 'worker_message',
                 token => $token,
                 event => $event
             });
@@ -145,13 +157,13 @@ sub _on_command_message {
     elsif ('action_all_operations_seen' eq $msg->{type}) {
         $self->workers->client_seen_operations($cl_id);
     }
-    elsif ('action_cancel_request' eq $msg->{type}) {
+    elsif ('action_cancel_operation' eq $msg->{type}) {
         my $token = $msg->{token};
         $self->workers->cancel_operation($token);
     }
     elsif ($msg->{type} =~ /^worker_/) {
         eval {
-            $self->workers->worker_message($msg);
+            $self->workers->worker_message($msg, $cl_id);
         } or do {
             $log->error("Failed to process the worker message: $@");
         }

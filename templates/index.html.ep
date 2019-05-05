@@ -8,6 +8,16 @@ var OPTIONS = {
 </script>
 
 <div class="container">
+
+<div class="row">
+<div class="col-md-12">
+<div class="button-group" id="bulk-actions">
+
+</div>
+</div>
+</div>
+
+
 <div class="row">
   <div class="col-md-8">
       <div id="flash-container"></div>
@@ -18,7 +28,7 @@ var OPTIONS = {
         <h3 class="panel-title">
         <span>Operations</span>
         <button type="button" class="btn btn-xs btn-default pull-right" id="operations-seen-button">
-          <i class="glyphicon glyphicon-eye-close"></i>
+          <i class="glyphicon glyphicon-check"></i>
         </button>
         </h3>
       </div>
@@ -53,7 +63,8 @@ var OPTIONS = {
       <div class="row">
         <div class="col-md-12">
          <div class="progress" style="margin-bottom:0">
-          <div class="progress-bar progress-bar-striped progress-bar-success"></div>
+          <div class="progress-bar progress-bar-striped progress-bar-success"
+          {{#progress}} style="width:{{ progress }}%" {{/progress}}></div>
          </div>
         </div>
       </div>
@@ -79,8 +90,13 @@ var OPTIONS = {
       {{ deviceId }} ( {{ action }} )
         </a>
         <button type="button" class="btn btn-xs btn-default pull-right operation-seen-button" data-token="{{ token }}">
-          <i class="glyphicon glyphicon-eye-close"></i>
+          <i class="glyphicon glyphicon-ok"></i>
         </button>
+        <!--
+        <button type="button" class="btn btn-xs btn-danger pull-right operation-cancel-button" data-token="{{ token }}">
+          <i class="glyphicon glyphicon-off"></i>
+        </button>
+        -->
       </h4>
     </div>
     <div id="collapse{{ token }}" class="panel-collapse collapse" role="tabpanel">

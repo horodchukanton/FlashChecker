@@ -17,11 +17,31 @@ sub new {
     my ($class, %params) = @_;
     my $self = { %params };
     bless $self, $class;
+
+    $self->init_events();
+
     return $self;
 }
 
 #@returns Mojo::EventEmitter
 sub events {return shift->{events}}
+
+sub init_events {
+    my ($self) = @_;
+
+    # This is fallback for windows hanged op
+    $self->events->on('client_disconnected' => sub {
+        my ($emitter, $cl_id) = @_;
+
+        # Find a worker connection for the client id
+        my @affected = grep {$running{$_}{connection_id} eq $cl_id} keys %running;
+        for (@affected) {
+            my $worker_token = $_;
+            $self->finished_operation($worker_token, 1);
+            $self->emit_for_token($worker_token, { exit_code => 1, pid => $running{pid} }, 'worker_action_finished');
+        }
+    })
+}
 
 =head2 start_operation
 
@@ -99,7 +119,7 @@ sub spawn_worker {
 }
 
 sub worker_message {
-    my ($self, $message) = @_;
+    my ($self, $message, $worker_cl_id) = @_;
 
     my $message_type = $message->{type};
     my $worker_token = $message->{token};
@@ -113,7 +133,8 @@ sub worker_message {
     if ($message_type eq 'worker_action_started') {
         $log->info("Worker said that he started an operation");
         $running{$worker_token}->{state} = 'started';
-
+        $running{$worker_token}->{connection_id} = $worker_cl_id;
+        $self->events->emit("worker_registered", $worker_cl_id);
         $self->emit_for_token($worker_token, $message, 'worker_action_started');
     }
     elsif ($message_type eq 'worker_child_running') {
@@ -126,6 +147,7 @@ sub worker_message {
         $log->info("Worker $worker_token finished");
         $running{$worker_token}->{state} = 'finished';
         $self->finished_operation($worker_token);
+        $self->events->emit("worker_deregistered", $worker_cl_id);
         $self->emit_for_token($worker_token, $message, 'worker_action_finished');
     }
     elsif ($message_type eq 'worker_output') {
@@ -135,6 +157,7 @@ sub worker_message {
     }
     elsif ($message_type eq 'worker_me_crashed') {
         $log->info("Worker crashed. Why Windows, WHY???");
+        $self->events->emit("worker_deregistered", $worker_cl_id);
         $self->finished_operation($worker_token, 1);
         $self->emit_for_token($worker_token, $message);
     }
@@ -159,8 +182,17 @@ sub finished_operation {
 }
 
 sub cancel_operation {
-    # TODO: Get a channel to worker,
-    # send the 'action_cancelled' request
+    my ($self, $token) = @_;
+
+    my $cl_id = $running{$token}{connection_id};
+
+    my $event = {
+        token  => $token,
+        reason => 'Our master wants to cancel the request'
+    };
+
+    $self->events->emit('message_to_worker', $token, $cl_id, $event, 'action_cancelled');
+
     return 1;
 
 }
@@ -245,13 +277,13 @@ sub client_seen_operations {
     if (!$token) {
         @to_delete = grep {
             $running{$_}->{client} eq $client_id
-              && $running{$_}->{state} eq 'finished'
+                && $running{$_}->{state} eq 'finished'
         } keys %running;
 
         return unless @to_delete;
     }
     else {
-        if ($running{$token}{state} ne 'finished'){
+        if ($running{$token}{state} ne 'finished') {
             $log->info('Seen on unfinished operation');
             return;
         }

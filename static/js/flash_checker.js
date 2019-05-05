@@ -4,6 +4,7 @@ var devicesList = null;
 var usbTemplate = null;
 var operationTemplate = null;
 var operations = null;
+var bulkActions = null;
 
 function processMessage(message) {
     var debugStr = $('<p>').text(JSON.stringify(message));
@@ -53,6 +54,7 @@ function Operations($container) {
 Operations.prototype = {
     _message_types: [
         'action_accepted',
+        'action_canceled',
         'worker_action_started',
         'worker_output',
         'worker_action_finished',
@@ -86,8 +88,6 @@ Operations.prototype = {
                 break;
             case 'worker_action_finished':
                 operation = this.onActionFinished(message, token);
-                //TODO: check finished code
-                this.setOperationViewClass(token, 'success');
                 break;
             case 'worker_event':
                 operation = this.findOperation(token);
@@ -141,6 +141,10 @@ Operations.prototype = {
         var self = this;
         $view.find('button.operation-seen-button').on('click', function () {
             self.onOperationSeenClicked(token);
+        });
+
+        $view.find('button.operation-cancel-button').on('click', function () {
+            self.onOperationCancelClicked(token);
         });
 
         return $view;
@@ -213,16 +217,31 @@ Operations.prototype = {
     },
     onActionFinished: function (message, token) {
         var operation = this.findOperation(token);
-
-        // TODO: check action success/failure
         console.log('finished', message);
-
         operation['state'] = 'finished';
 
+        var exit_code = message['event']['exit_code'];
+        var child_pid = message['event']['child_pid'];
+
+        var new_class = 'success';
+        // Ehh... Windows
+        if (exit_code === child_pid) {
+            new_class = 'success'
+        } else if ('canceled' === exit_code) {
+            new_class = 'warning'
+        } else {
+            console.warn("Create GitHub issue to add the Linux exit code support, exit: %s, pid: %s", exit_code, child_pid);
+        }
+        this.setOperationViewClass(token, new_class);
+        this.getOperationView(token).find('button.operation-cancel-button').remove();
         return operation;
     },
     onSeenClicked: function () {
         ws.send({type: 'action_all_operations_seen'});
+    },
+    onOperationCancelClicked: function (token) {
+        // TODO: confirm
+        ws.send({type: 'action_cancel_operation', token: token});
     },
     onOperationSeenClicked: function (token) {
         ws.send({type: 'action_operation_seen', token: token});
@@ -282,7 +301,8 @@ DevicesList.prototype = {
     onMessage: function (message) {
         switch (message['type']) {
             case 'connected':
-                this.add(this.createUsbDevice(message['device']));
+                var device = this.createUsbDevice(message['device'])
+                this.add(device);
                 this.renewHtml();
                 break;
             case 'removed':
@@ -306,13 +326,21 @@ DevicesList.prototype = {
     },
     add: function (usbDevice) {
         this.devices[usbDevice.getId()] = usbDevice;
+        bulkActions.updateActions(usbDevice.getActions());
     },
     renewDevice: function (deviceId, newInfo) {
-        // For now I know only FreeSpace and VolumeSerialNumber can be changed
-        // TODO: update and render all info
-
         var device = this.devices[deviceId];
-        device.setProgress(newInfo['Size'] - newInfo['FreeSpace'], newInfo['Size']);
+
+        if (!newInfo['Actions']) {
+            newInfo['Actions'] = device['info']['Actions'];
+        }
+
+        device.info = newInfo;
+
+        // Renew cached view
+        device.toHtml(true);
+
+        this.renewHtml();
     },
     remove: function (deviceId) {
         delete this.devices[deviceId];
@@ -382,13 +410,15 @@ USBDevice.prototype = {
         return this.info['Description'];
     },
     render: function () {
+        var progress = (100 / (this.info['Size'] / (this.info['Size'] - this.info['FreeSpace'])));
         var rendered = Mustache.render(usbTemplate, {
             id: this.getId(),
             root: this.getRootName(),
             name: this.getDescription(),
             format: this.info['FileSystem'],
             size: this.getSizeGb(),
-            actions: this.getActions()
+            actions: this.getActions(),
+            progress: progress
         });
 
         return $(rendered);
@@ -415,6 +445,57 @@ USBDevice.prototype = {
     }
 };
 
+function BulkActionsHandler($container) {
+    this.actions = [];
+    this.$container = $container;
+}
+
+BulkActionsHandler.prototype = {
+    render: function () {
+        this.$container.empty();
+        for (var i = 0; i < this.actions.length; i++) {
+            var action = this.actions[i];
+
+            var $button = $('<button></button>');
+            $button.addClass('btn btn-primary');
+            $button.attr('data-action', action);
+            $button.text(action + ' All');
+
+            var self = this;
+            $button.on('click', function () {
+                var $this = $(this);
+                var action = $this.attr('data-action');
+
+                // noinspection JSReferencingMutableVariableFromClosure
+                self.invokeBulkAction(action, $this);
+            });
+
+            this.$container.append($button);
+        }
+    },
+    invokeBulkAction: function (action, $button) {
+        var deviceIds = Object.keys(devicesList.devices);
+        for (var i = 0; i < deviceIds.length; i++) {
+            if (operations.isRunningFor(deviceIds[i])) {
+                continue;
+            }
+            operations.invokeAction(action, deviceIds[i], $button);
+        }
+    },
+    updateActions: function (newActions) {
+        var hasNew = false;
+        for (var i = 0; i < newActions.length; i++) {
+            if (this.actions.indexOf(newActions[i]) === -1) {
+                this.actions.push(newActions[i]);
+                hasNew = true;
+            }
+        }
+        if (hasNew) {
+            this.render();
+        }
+    }
+};
+
 $(function () {
     Events.on('WebSocket.error', function () {
         console.log('error');
@@ -423,6 +504,7 @@ $(function () {
     Events.once('WebSocket.connected', function () {
         devicesList = new DevicesList($('div#flash-container'));
         operations = new Operations($('div#operations-container'));
+        bulkActions = new BulkActionsHandler($('div#bulk-actions'));
 
         Events.on('message', processMessage);
         ws.send({type: 'request_list'});

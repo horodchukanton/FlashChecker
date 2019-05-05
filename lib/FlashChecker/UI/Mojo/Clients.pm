@@ -18,30 +18,48 @@ my %delivery_confirm = ();
 my $msg_num = 1;
 
 sub new {
-    my ( $class, %params ) = @_;
+    my ($class, %params) = @_;
     my $self = {
         %params,
-        clients => {}
+        clients => {},
+        other   => {}
     };
 
     $self->{ping_period} = $params{config}->{Websocket}->{PingPeriod} || 30;
 
     bless $self, $class;
+
+    $self->init_events();
     return $self;
 }
 
 #@returns Mojo::EventEmitter
 sub events {return shift->{events}}
 
-sub on_message {
-    my ( $self, $cl_id, $mojo_, $hash ) = @_;
+sub init_events {
+    my ($self) = @_;
 
-    if (! $self->get($cl_id)) {
+    $self->events->on(worker_registered => sub {
+        my ($emitter, $worker_cl_id) = @_;
+        $self->{other}{$worker_cl_id} = 1;
+    });
+
+    $self->events->on(worker_deregistered => sub {
+        my ($emitter, $worker_cl_id) = @_;
+        delete $self->{other}{$worker_cl_id};
+    });
+
+}
+
+sub on_message {
+    my ($self, $cl_id, $mojo_, $hash) = @_;
+
+    if (!$self->get($cl_id)) {
         $log->warn("Received message from an unregistered client $cl_id");
         return;
     }
 
-    if (! $hash->{type}) {
+    if (!$hash->{type}) {
         $log->warn("Received message without type. Ignoring:" . Dumper $hash);
         return;
     }
@@ -64,7 +82,7 @@ sub on_message {
         $self->send_message($cl_id, { type => 'pong' })
     }
     elsif ($hash->{type} eq 'pong') {
-        if (! $hash->{seq}) {
+        if (!$hash->{seq}) {
             confess "Received pong without 'seq'.";
         }
         delete $delivery_confirm{$hash->{seq}};
@@ -78,7 +96,7 @@ sub on_message {
 }
 
 sub config {
-    my ( $self, $config ) = @_;
+    my ($self, $config) = @_;
 
     if (defined $config) {
         $self->{ping_period} = $config->{Websocket}->{PingPeriod} || 30;
@@ -94,7 +112,7 @@ sub config {
 }
 
 sub add {
-    my ( $self, $mojo, $tx ) = @_;
+    my ($self, $mojo, $tx) = @_;
 
     my $id = $tx->connection();
     # my $prev = $mojo->cookie('tx');
@@ -104,7 +122,7 @@ sub add {
     #     $self->disconnected($prev);
     # }
 
-    if (! $self->{clients}->{$id}) {
+    if (!$self->{clients}->{$id}) {
         # New client
         # $mojo->cookie('tx' => $id);
         $self->{clients}->{$id} = $tx;
@@ -114,7 +132,7 @@ sub add {
 }
 
 sub get {
-    my ( $self, $cl_id ) = @_;
+    my ($self, $cl_id) = @_;
     if ($cl_id =~ /Mojo/) {
         confess "Code uses old ID";
     };
@@ -123,17 +141,20 @@ sub get {
 }
 
 sub count {
-    my ( $self ) = @_;
+    my ($self) = @_;
     return scalar keys %{$self->{clients}};
 }
 
 sub get_all {
-    my ( $self ) = @_;
-    return keys %{$self->{clients}};
+    my ($self) = @_;
+
+    my @real_clients = grep {!exists $self->{other}{$_}} keys %{$self->{clients}};
+
+    return @real_clients;
 }
 
 sub disconnected {
-    my ( $self, $cl ) = @_;
+    my ($self, $cl) = @_;
     $log->debug("Client disconnected $cl.");
 
     unless (exists $self->{clients}->{$cl}) {
@@ -145,18 +166,19 @@ sub disconnected {
     delete @delivery_confirm{@{_undelivered_messages_for($cl)}};
 
     delete $self->{clients}->{$cl};
+    $self->events->emit('client_disconnected', $cl);
     return 1;
 }
 
 sub send_message {
-    my ( $self, $cl_id, $msg, $confirm_sub ) = @_;
+    my ($self, $cl_id, $msg, $confirm_sub) = @_;
     return unless $cl_id;
 
     if ($cl_id eq 'ALL') {
         $self->notify_all($msg, $confirm_sub);
     }
 
-    $msg->{seq} = $msg_num ++;
+    $msg->{seq} = $msg_num++;
     $delivery_confirm{$msg->{seq}} = {
         type        => $msg->{type},
         ttl         => $msg->{ttl},
@@ -188,7 +210,7 @@ sub send_message {
 }
 
 sub notify_all {
-    my ( $self, $event, $cb ) = @_;
+    my ($self, $event, $cb) = @_;
 
     for ($self->get_all()) {
         $self->send_message($_, $event, $cb);
@@ -198,11 +220,11 @@ sub notify_all {
 }
 
 sub _continious_ping {
-    my ( $self ) = @_;
+    my ($self) = @_;
 
     # Check for failed ping
     for my $seq_id (keys %delivery_confirm) {
-        next if (! exists $delivery_confirm{$seq_id} || ! $delivery_confirm{$seq_id}->{type});
+        next if (!exists $delivery_confirm{$seq_id} || !$delivery_confirm{$seq_id}->{type});
         next if $delivery_confirm{$seq_id}->{type} ne 'ping';
 
         my $msg = $delivery_confirm{$seq_id};
@@ -219,7 +241,7 @@ sub _continious_ping {
 }
 
 sub _undelivered_messages_for {
-    my ( $cl_id ) = @_;
+    my ($cl_id) = @_;
     my @seq_ids = grep {
         $delivery_confirm{$_}->{client} eq $cl_id
     } keys %delivery_confirm;

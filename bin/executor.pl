@@ -85,7 +85,7 @@ main($return_url, $pid, $cfh);
 sub main {
     my ($websocket_url, $child_pid, $child_filehandle) = @_;
     my $connection = connect_to_websocket($websocket_url);
-    $connection = setup_connection_service_hadlers($connection);
+    $connection = setup_connection_service_hadlers($connection, $child_pid);
 
     my $finish_cv = AnyEvent->condvar();
 
@@ -156,7 +156,7 @@ sub connect_to_websocket {
 }
 
 sub setup_connection_service_hadlers {
-    my ($tx) = @_;
+    my ($tx, $child_pid) = @_;
 
     $tx->on(each_message => sub {
         # $connection is the same connection object
@@ -170,7 +170,7 @@ sub setup_connection_service_hadlers {
 
         if ($hash->{type} eq 'action_cancelled') {
             $action_log->info("Action was cancelled");
-            exit(0);
+            kill('INT', $child_pid);
         }
         if ($hash->{type} eq 'ping') {
             send_message($tx, {
