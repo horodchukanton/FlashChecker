@@ -33,7 +33,6 @@ sub init_events {
     $self->events->on('client_disconnected' => sub {
         my ($emitter, $cl_id) = @_;
 
-        # Find a worker connection for the client id
         my @affected = grep {$running{$_}{connection_id} eq $cl_id} keys %running;
         for (@affected) {
             my $worker_token = $_;

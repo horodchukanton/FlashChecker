@@ -23,13 +23,14 @@ Mind his work too.
  * * Now debug why it doesn't work and uncomment the button
  * ~~Append Actions to the 'changed' device information~~
  * Debug log in a separate window
+ * Acknowledge the master for executor connection before operation started
  * Mechanics to create "support" zip file with all the logs
  * Allow to mask a device ( hide it from the UI ), so you will not format your personal device
  * Allow some configuration to be changed through the UI
  * Client session persistence (allow to refresh the page saving the work) - client cookie
  * Gradle build
  * Tests :)
- * Logs in a separate folder
+ * ~~Logs in a separate folder~~
  * Logs are removed on a startup
  * Make the design look like this is something intended to be used by a human being
  * Browser notification when all operations finished
